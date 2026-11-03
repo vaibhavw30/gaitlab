@@ -1,6 +1,6 @@
 # data and models never get committed
-data/
-models/
+/data/
+/models/
 runs/
 wandb/
 *.task

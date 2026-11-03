@@ -21,6 +21,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def train(model_key: str, sft_dir: str = "data/sft", cfg_path: str = "configs/train_lora.yaml",
-          out_root: str = "runs", allow_synthetic: bool = False) -> Path:
+def train(
+    model_key: str,
+    sft_dir: str = "data/sft",
+    cfg_path: str = "configs/train_lora.yaml",
+    out_root: str = "runs",
+    allow_synthetic: bool = False,
+) -> Path:
     raise NotImplementedError("TASKS.md M3: LoRA training")

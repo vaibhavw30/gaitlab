@@ -37,8 +37,6 @@ using a small public tokenizer if one is available offline; otherwise mark it ``
 from __future__ import annotations
 
 
-def load_grader(  # noqa: ANN201
-    model_id: str, adapter_path: str | None = None, device: str = "cuda"
-):
+def load_grader(model_id: str, adapter_path: str | None = None, device: str = "cuda"):
     """See module docstring."""
     raise NotImplementedError("TASKS.md M3: grader")

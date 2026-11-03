@@ -8,8 +8,13 @@ ORDER = ["cadence_spm", "overstride_L"]
 
 
 def test_prompt_is_deterministic_and_handles_nan():
-    row = {"speed_kmh": 12.0, "cadence_spm_med": 164.04, "cadence_spm_iqr": 2.1,
-           "overstride_L_med": math.nan, "overstride_L_iqr": 0.03}
+    row = {
+        "speed_kmh": 12.0,
+        "cadence_spm_med": 164.04,
+        "cadence_spm_iqr": 2.1,
+        "overstride_L_med": math.nan,
+        "overstride_L_iqr": 0.03,
+    }
     a = format_prompt(row, ORDER)
     assert a == format_prompt(dict(row), ORDER)
     assert "cadence_spm: 164.0 (iqr 2.1)" in a

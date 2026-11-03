@@ -20,5 +20,5 @@ Contract:
 from __future__ import annotations
 
 
-def bench_scoring(grader, prompts, cfg_bench) -> dict:  # noqa: ANN001
+def bench_scoring(grader, prompts, cfg_bench) -> dict:
     raise NotImplementedError("TASKS.md M4: TensorRT benchmark")

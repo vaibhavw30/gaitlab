@@ -69,9 +69,7 @@ def stride_features(
         frame_dt = stride_time / (nxt - ic)
         contact_time = (to - ic + 1) * frame_dt
         shin = float(
-            np.degrees(
-                np.arctan2(d * (ankle[ic, 0] - knee[ic, 0]), knee[ic, 1] - ankle[ic, 1])
-            )
+            np.degrees(np.arctan2(d * (ankle[ic, 0] - knee[ic, 0]), knee[ic, 1] - ankle[ic, 1]))
         )
         strike = float(fang[ic])
         calibrated = standing_offset_deg is not None
@@ -95,9 +93,7 @@ def stride_features(
                 knee_flex_peak_deg=float(np.nanmax(kflex[ic : to + 1])),
                 foot_strike_deg=strike,
                 foot_strike_calibrated=calibrated,
-                vert_osc_L=float(
-                    (np.nanmax(hip[ic:nxt, 1]) - np.nanmin(hip[ic:nxt, 1])) / leg_len
-                ),
+                vert_osc_L=float((np.nanmax(hip[ic:nxt, 1]) - np.nanmin(hip[ic:nxt, 1])) / leg_len),
                 trunk_lean_deg=float(np.nanmean(trunk[ic : to + 1])),
                 quality=float(finite[ic:nxt].mean()),
             )

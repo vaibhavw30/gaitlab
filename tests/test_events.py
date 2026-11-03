@@ -44,7 +44,7 @@ def test_noisy_events_default_config(condition, seed):
 
 def test_stride_pairs_respect_time_bounds():
     cfg = PipelineConfig()
-    seq, truth = synth_clip(GaitParams())
+    seq, _truth = synth_clip(GaitParams())
     _, ev = _detect(seq, cfg)
     pairs = stride_pairs(ev, seq.t, cfg.events)
     assert len(pairs) == len(ev.ic) - 1

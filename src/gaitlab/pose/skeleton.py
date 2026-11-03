@@ -76,9 +76,7 @@ SOURCE_MAPS: dict[str, dict[str, int]] = {
 }
 
 
-def to_canonical(
-    xy: np.ndarray, vis: np.ndarray, source: str
-) -> tuple[np.ndarray, np.ndarray]:
+def to_canonical(xy: np.ndarray, vis: np.ndarray, source: str) -> tuple[np.ndarray, np.ndarray]:
     """Map backend keypoints to the canonical skeleton.
 
     Parameters

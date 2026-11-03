@@ -10,8 +10,8 @@ Legend: `[x]` done · `[~]` scaffolded, needs review against real data · `[ ]` 
 
 The scaffold was tested with pytest on synthetic data (71 tests passing, Python 3.13, CPU). It has **not** been through `uv` or Ruff yet.
 
-- [ ] `git init && git add -A && git commit -m "scaffold"` (before any tool rewrites files)
-- [ ] `uv python install 3.11 && uv sync --extra video --extra ml --extra viz --extra dev && uv lock`
+- [x] `git init && git add -A && git commit -m "scaffold"` (before any tool rewrites files)
+- [x] `uv python install 3.11 && uv sync --extra video --extra ml --extra viz --extra dev && uv lock`
 - [ ] `uv run ruff check --fix . && uv run ruff format .`, then `uv run pytest -m "not gpu and not data"`; commit
 - [ ] `uv run gaitlab --help` and `uv run gaitlab synth --n-sessions 6` work
 - [ ] Create the GitHub repo, push, confirm CI is green (user task: repo name, visibility, description)
@@ -30,7 +30,7 @@ Goal: the whole pipeline runs on other people's running and on synthetic data, s
 - [~] **Metrics** — `eval/metrics.py`. Tests: `test_metrics.py`
 - [~] **Results provenance + README table + claim check** — `report/results.py`, `report/readme_table.py`, `scripts/check_readme_numbers.py`. Tests: `test_results.py`
 - [~] **Prompt, SFT builder, verifier, rules, splits** — `llm/prompt.py`, `llm/sft_data.py`, `llm/verifier.py`, `models/rules.py`, `data/splits.py`. Tests: `test_prompt.py`, `test_verifier.py`, `test_splits.py`
-- [ ] **Video decode** — `io/video.py` (PyAV, PTS timestamps, fps check). Test: `test_video.py` with a tiny generated clip (PyAV can encode one in-test)
+- [x] **Video decode** — `io/video.py` (PyAV, PTS timestamps, fps check, rotation, VFR flag; ADR-0010). Test: `test_video.py` with tiny generated clips (PyAV encodes them in-test)
 - [ ] **MediaPipe backend** — `pose/mediapipe_backend.py` (Tasks API `PoseLandmarker`, VIDEO running mode, heavy model). Smoke test on a Mixkit clip (`@pytest.mark.data`)
 - [ ] **RTMPose backend** — `pose/rtmpose_backend.py` via rtmlib `Body` (Halpe-26 / body7 model). Same smoke test
 - [ ] **Overlay** — `viz/overlay.py`: skeleton, contact markers, knee/shin angle text → mp4 and GIF

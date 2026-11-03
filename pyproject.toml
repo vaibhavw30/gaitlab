@@ -62,3 +62,12 @@ ignore = ["RUF001", "RUF002", "RUF003"]  # allow unicode (°, −, ×) in string
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
+
+[tool.uv]
+# tensorrt-cu13-libs is a stub sdist on PyPI that fetches its wheel from NVIDIA at build time,
+# which fails on macOS during uv's universal locking. Listing NVIDIA's index first gives uv real
+# wheel metadata for the TensorRT family (a transitive dependency, so tool.uv.sources can't pin
+# it); packages NVIDIA doesn't host still come from PyPI.
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Callable, Sequence
 
 import numpy as np
@@ -106,7 +107,7 @@ def ece(probs: np.ndarray, y_true: Sequence[int], n_bins: int = 10) -> float:
     correct = (pred == np.asarray(y_true)).astype(float)
     bins = np.linspace(0, 1, n_bins + 1)
     total = 0.0
-    for lo, hi in zip(bins[:-1], bins[1:], strict=True):
+    for lo, hi in itertools.pairwise(bins):
         m = (conf > lo) & (conf <= hi) if lo > 0 else (conf >= lo) & (conf <= hi)
         if m.any():
             total += m.mean() * abs(correct[m].mean() - conf[m].mean())

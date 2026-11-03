@@ -90,7 +90,7 @@ All schemas also live as dataclasses or pydantic models in `types.py` and `data/
 |---|---|---|---|
 | `xy` | (T, 13, 2) | float32 | pixels, origin top-left, **y down** as stored |
 | `vis` | (T, 13) | float32 | visibility or confidence in [0, 1] |
-| `t` | (T,) | float64 | seconds from clip start, from container PTS |
+| `t` | (T,) | float64 | seconds from the first presented frame, from container PTS × time_base ([ADR-0010](adr/0010-video-decode-timestamps-rotation-vfr.md)) |
 | `fps` | () | float64 | nominal fps |
 | `size` | (2,) | int32 | (width, height) |
 | `backend` | () | str | `mediapipe` / `rtmpose` / `mocap_proj` / `synthetic` |

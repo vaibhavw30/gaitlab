@@ -17,6 +17,12 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def render_overlay(video_path: str, seq, analysis, out_path: str, gif: bool = False,  # noqa: ANN001
-                   max_seconds: float | None = None) -> Path:
+def render_overlay(
+    video_path: str,
+    seq,
+    analysis,
+    out_path: str,
+    gif: bool = False,
+    max_seconds: float | None = None,
+) -> Path:
     raise NotImplementedError("TASKS.md M0: overlay")

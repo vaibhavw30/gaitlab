@@ -7,7 +7,7 @@ from gaitlab.pose.skeleton import CANONICAL, J, side_joints, to_canonical
 def test_mediapipe_feet_mapped():
     xy = np.arange(33 * 2, dtype=float).reshape(1, 33, 2)
     vis = np.ones((1, 33))
-    out, v = to_canonical(xy, vis, "mediapipe33")
+    out, _v = to_canonical(xy, vis, "mediapipe33")
     assert out.shape == (1, len(CANONICAL), 2)
     np.testing.assert_array_equal(out[0, J["l_heel"]], xy[0, 29])
     np.testing.assert_array_equal(out[0, J["r_toe"]], xy[0, 32])

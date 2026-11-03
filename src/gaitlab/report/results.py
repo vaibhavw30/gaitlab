@@ -74,7 +74,7 @@ def hardware() -> dict[str, str | None]:
     except (subprocess.SubprocessError, FileNotFoundError):
         pass
     try:
-        import torch  # noqa: PLC0415
+        import torch
 
         info["cuda"] = torch.version.cuda
     except ImportError:

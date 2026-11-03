@@ -57,9 +57,7 @@ def joint_angle_deg(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> np.ndarray:
     return np.degrees(np.arccos(np.clip(cos, -1.0, 1.0)))
 
 
-def signed_angle_from_vertical_deg(
-    lower: np.ndarray, upper: np.ndarray, d: int
-) -> np.ndarray:
+def signed_angle_from_vertical_deg(lower: np.ndarray, upper: np.ndarray, d: int) -> np.ndarray:
     """Angle of the segment lower→upper from vertical (y-up); positive when ``upper`` is ahead.
 
     Used for trunk lean (hip→shoulder): positive = leaning forward.
