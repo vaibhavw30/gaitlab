@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv sync:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run python scripts/check_readme_numbers.py)",
+      "Bash(uv run gaitlab --help)",
+      "Bash(uv run gaitlab synth:*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Edit(./results/**)",
+      "Write(./results/**)",
+      "Edit(./data/**)",
+      "Write(./data/**)",
+      "Read(./.env)"
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+# LoRA fine-tuning recipe (TECHNICAL_PLAN §7.2). Same recipe for both model sizes.
+models:
+  1b: google/gemma-3-1b-it
+  270m: google/gemma-3-270m-it
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+train:
+  epochs: 3
+  lr: 2.0e-4
+  scheduler: cosine
+  warmup_ratio: 0.05
+  per_device_batch_size: 4
+  grad_accum_steps: 4        # effective batch 16
+  bf16: true
+  assistant_only_loss: true
+  seed: 0
+  max_seq_len: 384
+
+grade:
+  max_prompt_tokens: 256     # left-pad to this for a static scoring shape (ADR-0004)
+  grade_tokens: [" 1", " 2", " 3", " 4", " 5"]
+
+generate:
+  max_new_tokens: 64
+  do_sample: false
+
+logging:
+  wandb_project: gaitlab     # optional; runs/<run_id>/ is always written

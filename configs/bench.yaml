@@ -1,0 +1,11 @@
+# Benchmark protocol (EVALUATION.md §4)
+warmup_iters: 20
+measure_iters: 200
+batch_sizes: [1, 16]
+precision: fp16
+clip: data/raw/BENCH/natural.mp4   # fixed 60-s clip; set per machine
+stages: [decode, pose, clean_events_features, scoring_pass, generate]
+trt:
+  ir: dynamo
+  optimization_level: 3
+  parity_required: 1.0             # fraction of test prompts with identical argmax grade

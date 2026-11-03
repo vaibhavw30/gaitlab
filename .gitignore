@@ -1,0 +1,30 @@
+# data and models never get committed
+data/
+models/
+runs/
+wandb/
+*.task
+*.onnx
+*.engine
+*.safetensors
+*.mp4
+*.mov
+*.gif
+!docs/assets/*.gif
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+
+# env and editors
+.env
+.DS_Store
+.idea/
+.vscode/

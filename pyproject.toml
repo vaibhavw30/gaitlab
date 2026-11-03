@@ -1,0 +1,64 @@
+[project]
+name = "gaitlab"
+version = "0.1.0"
+description = "Grades treadmill running form from a side-view video: pose -> per-stride biomechanics -> LoRA-tuned small LLM grade, tags and cue."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Vaibhav Wudaru" }]
+requires-python = ">=3.11,<3.13"
+# Versions are deliberately unpinned here; pin with `uv lock` after the first working install.
+dependencies = [
+    "numpy",
+    "scipy",
+    "pandas",
+    "pyarrow",
+    "pyyaml",
+    "pydantic>=2",
+    "typer",
+    "rich",
+]
+
+[project.optional-dependencies]
+video = ["av", "pillow"]
+mediapipe = ["mediapipe"]
+rtm = ["rtmlib", "sports2d", "onnxruntime-gpu"]
+app = ["gradio"]
+ml = ["scikit-learn", "lightgbm"]
+# Install torch for your CUDA version first (pytorch.org), then this extra.
+llm = ["torch", "transformers", "peft", "trl", "accelerate", "datasets", "wandb"]
+trt = ["torch-tensorrt", "tensorrt"]
+viz = ["matplotlib", "plotly"]
+dev = ["pytest", "ruff", "mypy"]
+
+[project.scripts]
+gaitlab = "gaitlab.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gaitlab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "-ra"
+markers = [
+    "gpu: needs an NVIDIA GPU (skipped in CI)",
+    "data: needs downloaded public or own data (skipped in CI)",
+    "slow: slow test",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "NPY", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # allow unicode (°, −, ×) in strings and docs
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

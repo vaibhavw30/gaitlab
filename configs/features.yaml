@@ -1,0 +1,53 @@
+# Tag vocabulary, the window feature each tag tests, and cue keywords for the verifier.
+# THRESHOLDS ARE INTENTIONALLY null. They are calibrated in M2 from natural-condition windows and
+# Running Injury Clinic percentiles, then recorded in an ADR (TECHNICAL_PLAN §5.5, CLAUDE.md rule 5).
+# Rules and the verifier raise ThresholdsNotCalibrated on real data while any used threshold is null.
+
+feature_order:   # fixed prompt order (llm/prompt.py)
+  - cadence_spm
+  - overstride_L
+  - shin_angle_deg
+  - knee_flex_ic_deg
+  - knee_flex_peak_deg
+  - foot_strike_deg
+  - vert_osc_L
+  - trunk_lean_deg
+  - contact_time_s
+  - duty_factor
+
+tags:
+  overstride:
+    feature: overstride_L_med
+    op: ">"
+    threshold: null
+    keywords: [overstride, "lands ahead", "land closer", "under your hips", "shorter stride", "reach"]
+  low_cadence:
+    feature: cadence_spm_med
+    op: "<"
+    threshold: null
+    keywords: [cadence, "step rate", "quicker steps", "more steps", "turnover"]
+  high_bounce:
+    feature: vert_osc_L_med
+    op: ">"
+    threshold: null
+    keywords: [bounce, bouncing, "vertical", "run lower", "less up-and-down"]
+  stiff_knee_landing:
+    feature: knee_flex_ic_deg_med
+    op: "<"
+    threshold: null
+    keywords: [knee, "straight leg", "soft landing", "bend"]
+  steep_heel_strike:
+    feature: foot_strike_deg_med
+    op: ">"
+    threshold: null
+    keywords: [heel, "toe up", "foot strike", "land flatter"]
+  forward_lean:
+    feature: trunk_lean_deg_med
+    op: ">"
+    threshold: null
+    keywords: [lean, "upright", "tall", "hips", "posture"]
+  backward_lean:
+    feature: trunk_lean_deg_med
+    op: "<"
+    threshold: null
+    keywords: [lean, "leaning back", "upright", "posture"]

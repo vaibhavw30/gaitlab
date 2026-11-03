@@ -1,0 +1,35 @@
+# Pipeline parameters. Every run hashes the resolved config into its results (TECHNICAL_PLAN §9).
+seed: 0
+
+capture:
+  min_fps: 100              # clips below this are rejected unless --allow-low-fps (FR-1)
+  contact_time_min_fps: 200 # contact_time is only reported from clips at or above this fps
+
+pose:
+  backend: mediapipe        # mediapipe | rtmpose (primary chosen in ADR-0005)
+  mediapipe_model: models/pose_landmarker_heavy.task
+  rtmpose_mode: performance # rtmlib Body mode
+
+clean:
+  visibility_min: 0.5
+  max_gap_s: 0.025          # longest NaN run to interpolate (about 3 frames at 120 fps)
+  lowpass_hz: 12.0          # Butterworth cutoff for event detection (ADR-0008); tune on BioCV
+  feature_lowpass_hz: 20.0  # cutoff for feature signals (ADR-0008); tune on BioCV
+  filter_order: 4
+
+events:
+  contact_height_frac: 0.03 # foot within this many leg lengths of ground level
+  ground_percentile: 5.0
+  min_stance_s: 0.08
+  stride_time_min_s: 0.45
+  stride_time_max_s: 1.0
+
+windows:
+  strides: 20               # ADR-0006 (Riazati et al. 2019)
+  quality_min: 0.8
+
+runner:
+  leg_length_cm: null       # set to report vert_osc_cm
+
+bootstrap:
+  n: 2000
