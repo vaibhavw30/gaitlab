@@ -23,6 +23,10 @@ data/
 ├── manifest.json                # sha256 of every file used by a run → data_manifest_hash
 └── synthetic/                   # gaitlab synth output; SYNTHETIC marker; never reported
     ├── windows.parquet, labels.csv, sessions.json
+    ├── splits.json              # session split of the synthetic sessions (reset by synth)
+    ├── predictions/<model>.csv  # gaitlab baselines --synthetic (+ <model>.meta.json)
+    ├── sft/{train,dev,test}.jsonl
+    ├── plots/                   # synthetic charts (never under docs/)
     ├── sessions.csv             # with --write-keypoints; path → the npz below
     ├── interim/<session_id>/<clip_id>.synthetic.npz
     └── processed/<session_id>/  # gaitlab process on synthetic keypoints
@@ -90,6 +94,9 @@ uv run gaitlab synth --n-sessions 6 --write-keypoints
 uv run gaitlab process --session 20260101-01 --sessions data/synthetic/sessions.csv --backend synthetic
 uv run gaitlab process --clip data/synthetic/interim/20260101-01/natural.synthetic.npz
 uv run gaitlab overlay --clip data/synthetic/interim/20260101-01/natural.synthetic.npz --gif
+uv run gaitlab baselines --synthetic && uv run gaitlab build-sft --synthetic && uv run gaitlab eval --synthetic
 ```
+
+The last line writes `results/synthetic/grader/{ladder,tags,calibration}.json` ([ADR-0012](adr/0012-synthetic-grader-dry-run.md)).
 
 Every output carries the flag: npz `backend="synthetic"` and `meta.synthetic`, a `synthetic` column in the CSV and parquet files, `SYNTHETIC` marker files, and a SYNTHETIC watermark on overlay frames.

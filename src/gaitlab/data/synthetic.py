@@ -187,12 +187,14 @@ def synth_clip(
     duration_s: float = 12.0,
     noise: NoiseParams | None = None,
     size: tuple[int, int] = (1920, 1080),
-    px_per_m: float = 600.0,
+    px_per_m: float = 500.0,
     standing: bool = False,
 ) -> tuple[KeypointSeq, SyntheticTruth]:
     """Generate a clip and its ground truth.
 
     With ``standing=True`` the runner stands still with flat feet (foot-angle calibration clip).
+    The default scale fits the whole body (head about 1.8 m above the belt) in a 1080-px-high
+    frame with the belt 100 px above the bottom edge.
     """
     p = params or GaitParams()
     nz = noise or NoiseParams()
@@ -420,6 +422,37 @@ def synthetic_sessions(
             {"session_id": c.session_id, "date": c.date, "clip_id": c.clip_id, "synthetic": True}
         )
     return windows, labels, sessions
+
+
+def load_synthetic_grader_inputs(
+    root: str | Path = "data/synthetic",
+) -> tuple[list[dict], dict[str, dict], dict[str, str]]:
+    """``gaitlab synth`` output → (window rows, window_id → label, session split).
+
+    The split is by session date (``data.splits.make_session_split``) over ``sessions.json`` and
+    is written once to ``<root>/splits.json`` (frozen like ``data/splits.json``, but separate).
+    """
+    import json
+
+    import pandas as pd
+
+    from gaitlab.data.sessions import latest_normal_labels, load_labels
+    from gaitlab.data.splits import make_session_split, write_split_frozen
+
+    root = Path(root)
+    if not (root / "SYNTHETIC").exists():
+        raise FileNotFoundError(f"{root} has no SYNTHETIC marker; run gaitlab synth first")
+    windows = pd.read_parquet(root / "windows.parquet").to_dict("records")
+    if not all(w.get("synthetic") is True for w in windows):
+        raise ValueError(f"{root}/windows.parquet has rows not flagged synthetic")
+    labels = {
+        wid: {"grade": r.grade, "tags": r.tags, "cue": r.cue}
+        for wid, r in latest_normal_labels(load_labels(root / "labels.csv")).items()
+    }
+    sessions = json.loads((root / "sessions.json").read_text())
+    split = make_session_split([(s["session_id"], s["date"]) for s in sessions])
+    write_split_frozen(split, root / "splits.json")
+    return windows, labels, split
 
 
 def save_synthetic_keypoints(clips: list[SyntheticClip], root: str | Path) -> Path:

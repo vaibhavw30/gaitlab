@@ -114,6 +114,32 @@ def ece(probs: np.ndarray, y_true: Sequence[int], n_bins: int = 10) -> float:
     return float(total)
 
 
+def reliability_table(
+    probs: np.ndarray, y_true: Sequence[int], n_bins: int = 10
+) -> list[dict[str, float | int | None]]:
+    """Per equal-width bin of max P: bin edges, count, mean confidence and accuracy.
+
+    Same binning as ``ece``. Empty bins have ``confidence`` and ``accuracy`` None.
+    """
+    p = np.asarray(probs, float)
+    conf = p.max(axis=1)
+    correct = (p.argmax(axis=1) + 1 == np.asarray(y_true)).astype(float)
+    edges = np.linspace(0, 1, n_bins + 1)
+    out: list[dict[str, float | int | None]] = []
+    for lo, hi in itertools.pairwise(edges):
+        m = (conf > lo) & (conf <= hi) if lo > 0 else (conf >= lo) & (conf <= hi)
+        out.append(
+            {
+                "low": float(lo),
+                "high": float(hi),
+                "count": int(m.sum()),
+                "confidence": float(conf[m].mean()) if m.any() else None,
+                "accuracy": float(correct[m].mean()) if m.any() else None,
+            }
+        )
+    return out
+
+
 def cluster_bootstrap_ci(
     stat: Callable[[np.ndarray], float],
     groups: Sequence[str],

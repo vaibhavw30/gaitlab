@@ -7,6 +7,7 @@ Everything here runs on synthetic keypoints, so every artifact must carry the sy
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -141,3 +142,56 @@ def test_overlay_cli_gif_without_video(tmp_path: Path):
     with Image.open(gif) as im:
         assert im.size[0] == 400  # narrower than the 480-px cap, so not resized
         assert im.n_frames > 1
+
+
+def test_process_strides_carry_condition_and_knee_cycle(synth_dir: Path):
+    sid = load_sessions(synth_dir / "sessions.csv")[0].session_id
+    strides = pd.read_parquet(synth_dir / "processed" / sid / "strides.parquet")
+    assert set(strides["condition"]) == set(CONDITIONS)
+    assert all(len(c) == 101 for c in strides["knee_flex_cycle_deg"])
+
+
+@pytest.fixture(scope="module")
+def grader_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A 6-session synthetic dataset run through baselines, build-sft and eval."""
+    root = tmp_path_factory.mktemp("grader")
+    data, results = root / "synthetic", root / "results"
+    _invoke("synth", "--n-sessions", "6", "--out", str(data), "--config", CFG, "--features", FCFG)
+    common = ("--synthetic", "--root", str(data), "--config", CFG, "--features", FCFG)
+    _invoke("baselines", *common)
+    _invoke("build-sft", *common)
+    _invoke("eval", *common, "--results", str(results), "--n-boot", "50")
+    return root
+
+
+def test_synthetic_split_is_by_session_and_written_beside_the_data(grader_dir: Path):
+    split = json.loads((grader_dir / "synthetic" / "splits.json").read_text())
+    assert sorted(split.values()).count("test") == 2 and list(split.values()).count("dev") == 1
+
+
+def test_build_sft_synthetic_writes_session_disjoint_jsonl(grader_dir: Path):
+    split = json.loads((grader_dir / "synthetic" / "splits.json").read_text())
+    seen: dict[str, set[str]] = {}
+    for part in ("train", "dev", "test"):
+        lines = (grader_dir / "synthetic" / "sft" / f"{part}.jsonl").read_text().splitlines()
+        assert lines, part
+        recs = [json.loads(x) for x in lines]
+        assert all(r["synthetic"] is True for r in recs)
+        seen[part] = {r["window_id"].split(":")[0] for r in recs}
+        assert all(split[s] == part for s in seen[part])
+    assert not (seen["train"] & seen["test"]) and not (seen["dev"] & seen["test"])
+
+
+def test_baselines_and_eval_synthetic_write_only_synthetic_results(grader_dir: Path):
+    preds = grader_dir / "synthetic" / "predictions"
+    assert {p.stem for p in preds.glob("*.csv")} == {"rules", "logreg", "lgbm"}
+    out = grader_dir / "results" / "synthetic" / "grader"
+    assert {p.stem for p in out.glob("*.json")} == {"ladder", "tags", "calibration"}
+    assert not (grader_dir / "results" / "grader").exists()
+    for p in out.glob("*.json"):
+        assert json.loads(p.read_text())["synthetic"] is True
+
+
+def test_baselines_without_synthetic_is_not_available_yet():
+    res = runner.invoke(app, ["baselines"])
+    assert res.exit_code != 0

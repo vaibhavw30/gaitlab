@@ -74,6 +74,12 @@ ignore_missing_imports = true
 # which fails on macOS during uv's universal locking. Listing NVIDIA's index first gives uv real
 # wheel metadata for the TensorRT family (a transitive dependency, so tool.uv.sources can't pin
 # it); packages NVIDIA doesn't host still come from PyPI.
+#
+# rtmlib requires CPU onnxruntime unconditionally. On Linux that would install it next to
+# onnxruntime-gpu (both ship the `onnxruntime` module and overwrite each other), so the override
+# keeps CPU onnxruntime off Linux; the rtm extra supplies onnxruntime-gpu there instead.
+override-dependencies = ["onnxruntime; sys_platform != 'linux'"]
+
 [[tool.uv.index]]
 name = "nvidia"
 url = "https://pypi.nvidia.com"

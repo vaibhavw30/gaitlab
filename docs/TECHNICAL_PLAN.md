@@ -100,7 +100,7 @@ Downstream code converts to **y-up** once via `gait.geometry.to_y_up()`.
 
 ### 4.3 Strides (`data/processed/<session>/strides.parquet`)
 
-One row per near-side stride: `session_id, clip_id, stride_idx, side, ic_frame, to_frame, next_ic_frame, t_ic, stride_time_s, contact_time_s, duty_factor, cadence_spm, overstride_L, shin_angle_deg, knee_flex_ic_deg, knee_flex_peak_deg, foot_strike_deg, foot_strike_calibrated (bool), vert_osc_L, trunk_lean_deg, quality, synthetic (bool)`. `synthetic` is True when the KeypointSeq was generated (`KeypointSeq.synthetic`); such outputs also get a `SYNTHETIC` marker file in their folder ([ADR-0011](adr/0011-no-video-path-synthetic-keypoints-single-clip-overlay.md)).
+One row per near-side stride: `session_id, clip_id, condition, stride_idx, side, ic_frame, to_frame, next_ic_frame, t_ic, stride_time_s, contact_time_s, duty_factor, cadence_spm, overstride_L, shin_angle_deg, knee_flex_ic_deg, knee_flex_peak_deg, foot_strike_deg, foot_strike_calibrated (bool), vert_osc_L, trunk_lean_deg, quality, knee_flex_cycle_deg (101 floats: knee flexion from IC to next IC, resampled by time; `features.knee_cycle_curve`), synthetic (bool)`. `synthetic` is True when the KeypointSeq was generated (`KeypointSeq.synthetic`); such outputs also get a `SYNTHETIC` marker file in their folder ([ADR-0011](adr/0011-no-video-path-synthetic-keypoints-single-clip-overlay.md)).
 
 ### 4.4 Windows (`data/processed/<session>/windows.parquet`)
 
@@ -186,7 +186,7 @@ Gradio app. Left: the window's clip segment with the skeleton overlay (pre-rende
 ### 7.1 Baselines (`models/`)
 
 - `rules.py`: grade = 5 − (number of flagged tags), clipped to [1, 5]. Tags = flagged tags.
-- `baselines.py`: logistic regression (multinomial, standardized features) and LightGBM (multiclass, small fixed grid). Leave-one-session-out CV on train + dev; final fit on train + dev, scored on test.
+- `baselines.py`: logistic regression (multinomial, standardized features) and LightGBM (multiclass, small fixed grid). Leave-one-session-out CV on train + dev; final fit on train + dev, scored on test. `predict_proba` always returns 5 columns (grades 1–5; unseen grades get 0). Tags: one-vs-rest LR per tag, shared by both. Predictions are written as `<model>.csv` with `window_id, pred_grade, p1..p5, tags, cue, synthetic` ([ADR-0012](adr/0012-synthetic-grader-dry-run.md)).
 
 ### 7.2 LLM grader (`llm/`)
 
@@ -253,11 +253,11 @@ Metric definitions, splits and protocol live in [EVALUATION.md](EVALUATION.md). 
 | `process --clip NPZ` | the same for one KeypointSeq with no sessions row: session = the npz's folder name, clip = file name up to the first dot, condition inferred from the clip id. Writes `<clip>.strides.parquet` and `<clip>.windows.parquet` to `data/processed/<session>/` (`data/synthetic/processed/<session>/` for synthetic keypoints) unless `--out` |
 | `overlay --clip NPZ [--video MP4] [--gif]` | skeleton + IC/TO markers + near-side knee and shin angles, on the video or on a plain canvas of `KeypointSeq.size`. Default output `<npz stem>.overlay.{mp4,gif}` |
 | `label [--blind N]` | launch labeling app |
-| `baselines` | fit and predict rules / LR / LightGBM |
-| `build-sft` | labels + windows → SFT JSONL (session split) |
+| `baselines [--synthetic]` | fit and predict rules / LR / LightGBM. `--synthetic`: on `data/synthetic`, predictions to `data/synthetic/predictions/` |
+| `build-sft [--synthetic]` | labels + windows → SFT JSONL (session split). `--synthetic`: `data/synthetic/sft/*.jsonl` |
 | `train --config configs/train_lora.yaml --model {1b,270m}` | LoRA fine-tune |
 | `predict --model ...` | grade + tags + cue for the test split |
-| `eval` | all metrics → results/grader |
+| `eval [--synthetic]` | all metrics → results/grader (`--synthetic`: results/synthetic/grader, never reported) |
 | `validate {biocv,mocap}` | event and feature validation → results/validation |
 | `bench [--trt]` | latency and TensorRT → results/bench |
 | `report` | regenerate the README results table |

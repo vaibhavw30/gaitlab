@@ -50,6 +50,20 @@ def shin_angle_deg(xy_up: np.ndarray, side: str, d: int) -> np.ndarray:
     return np.degrees(np.arctan2(d * (ankle[:, 0] - knee[:, 0]), knee[:, 1] - ankle[:, 1]))
 
 
+def knee_cycle_curve(
+    xy_up: np.ndarray, t: np.ndarray, side: str, ic: int, next_ic: int, n: int = 101
+) -> np.ndarray:
+    """Knee flexion (deg) over one stride, resampled by time to ``n`` points (0–100%).
+
+    Point 0 is the IC frame and point ``n − 1`` the next IC frame; ``t`` (s) handles VFR.
+    """
+    seg = slice(int(ic), int(next_ic) + 1)
+    knee = knee_flexion_deg(xy_up[seg], side)
+    tt = np.asarray(t[seg], dtype=np.float64)
+    frac = (tt - tt[0]) / (tt[-1] - tt[0])
+    return np.interp(np.linspace(0.0, 1.0, n), frac, knee)
+
+
 def stride_features(
     xy_up: np.ndarray,
     t: np.ndarray,

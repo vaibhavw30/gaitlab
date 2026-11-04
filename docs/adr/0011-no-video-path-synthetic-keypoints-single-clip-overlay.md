@@ -16,4 +16,4 @@ Until own recordings exist, the pipeline should run end to end without any video
 ## Consequences
 - `windows.parquet` and `strides.parquet` gain a `synthetic` column (TECHNICAL_PLAN §4.3–4.4). Readers that select `<feature>_med/_iqr` columns are unaffected.
 - A lone clip in a folder not named like a session gets that folder name as its session id. Pass `--session-id` for anything that will be split or labeled.
-- The synthetic runner's default scale (600 px/m on 1080p) puts the head above the canvas top. Fine for checking legs and events; change `synth_clip(px_per_m=...)` if a full-body synthetic GIF is wanted.
+- The synthetic runner's default scale was lowered from 600 to 500 px/m so the whole body fits a 1080-px frame (`test_synthetic.py::test_default_frame_holds_the_whole_body`). Features are in leg lengths, deg and s, so no feature test changed.

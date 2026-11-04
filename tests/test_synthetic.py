@@ -1,6 +1,7 @@
 import numpy as np
+import pytest
 
-from gaitlab.data.synthetic import GaitParams, synth_clip
+from gaitlab.data.synthetic import CONDITIONS, GaitParams, condition_params, synth_clip
 from gaitlab.gait import geometry
 from gaitlab.pose.skeleton import J
 
@@ -43,3 +44,16 @@ def test_direction_flips_image_x():
 def test_near_side_from_visibility():
     seq, _ = synth_clip(GaitParams(near_side="l"), duration_s=2)
     assert geometry.near_side(seq.vis) == "l"
+
+
+@pytest.mark.parametrize("condition", [*CONDITIONS, "standing"])
+def test_default_frame_holds_the_whole_body(condition):
+    """Every joint, head included, lies inside the default 1920x1080 frame."""
+    if condition == "standing":
+        seq, truth = synth_clip(standing=True, duration_s=1.0)
+    else:
+        seq, truth = synth_clip(condition_params(GaitParams(), condition), duration_s=4.0)
+    w, h = seq.size
+    x, y = truth.xy_clean[..., 0], truth.xy_clean[..., 1]
+    assert x.min() >= 0 and x.max() < w
+    assert y.min() >= 0 and y.max() < h, f"y range {y.min():.0f}..{y.max():.0f} px"

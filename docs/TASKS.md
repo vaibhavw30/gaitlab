@@ -37,7 +37,7 @@ Goal: the whole pipeline runs on other people's running and on synthetic data, s
 - [ ] **RTMPose backend** — `pose/rtmpose_backend.py` via rtmlib `Body` (Halpe-26 / body7 model). Same smoke test
 - [x] **Overlay** — `viz/overlay.py`: skeleton, contact markers, knee/shin angle text → mp4 and GIF; video background optional (plain canvas from `KeypointSeq.size`). Tests: `test_overlay.py` (ADR-0011)
 - [ ] **CLI wiring** — `extract`, `process`, `overlay`, `synth` in `cli.py`. Done: `synth --write-keypoints`, `process --session/--clip`, `overlay --clip [--video] [--gif]` (`test_cli.py`, ADR-0011). Left: `extract`
-- [ ] **Synthetic dry run** — `gaitlab synth --n-sessions 6` → strides, windows, rule labels (`synthetic=True`) → `baselines` → `eval` writes to `results/synthetic/`
+- [x] **Synthetic dry run** — `gaitlab synth --n-sessions 6` → strides, windows, rule labels (`synthetic=True`) → `baselines --synthetic` → `build-sft --synthetic` → `eval --synthetic` writes to `results/synthetic/grader/` (`test_cli.py`, ADR-0012)
 - [ ] **Mocap projection** — `data/mocap.py` for Fukuchi 2017 (smallest; CC-BY) then Running Injury Clinic. → `results/validation/mocap_features.json` (V3)
 - [ ] **BioCV loader + event validation** — `data/biocv.py`; `gaitlab validate biocv` → `results/validation/biocv_events.json` (V1), `biocv_angles.json` (V2). **Confirm the license with the user first.**
 - [ ] **Read Stenum et al.'s event code; compare with ours on BioCV**, and record the differences in an ADR if we change the method
@@ -60,7 +60,7 @@ Goal: the whole pipeline runs on other people's running and on synthetic data, s
 - [ ] **Calibrate `configs/features.yaml` thresholds** from natural-condition windows + Running Injury Clinic percentiles → ADR-0009
 - [ ] Labeling app `label/app.py` (normal + blind modes; append-only CSV with lock)
 - [ ] Label ~200 windows (user task); freeze `data/splits.json`
-- [ ] Baselines `models/baselines.py` (LR, LightGBM, LOSO CV)
+- [~] Baselines `models/baselines.py` (LR, LightGBM, LOSO CV). Tested on synthetic (`test_baselines.py`); `gaitlab baselines` without `--synthetic` waits for real labels and `data/splits.json`
 
 ## M3 — Grader
 
@@ -69,8 +69,8 @@ Goal: the whole pipeline runs on other people's running and on synthetic data, s
 - [ ] `llm/train_lora.py` (TRL SFTTrainer, assistant-only loss) for `gemma-3-1b-it` and `gemma-3-270m-it` (`@pytest.mark.gpu` smoke test with 4 steps)
 - [ ] Zero-shot 1B predictions
 - [ ] Blind re-grade of 40 windows (user task) → `results/grader/intra_rater.json` (G2)
-- [ ] `eval/run_eval.py` → G1, G3–G6 result files
-- [ ] `viz/plots.py`: ladder chart, knee-angle-by-condition, confusion matrix, reliability diagram
+- [ ] `eval/run_eval.py` → G1, G3–G6 result files. Done: G1 `ladder`, G3 `tags`, G5 `calibration` (`test_run_eval.py`). Left: G4 verifier, G6 consistency (need LLM predictions)
+- [ ] `viz/plots.py`: ladder chart, knee-angle-by-condition, confusion matrix, reliability diagram. Done: ladder, knee-by-condition (`test_plots.py`). Left: confusion, reliability
 
 ## M4 — Speed and polish
 

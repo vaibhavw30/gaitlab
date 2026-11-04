@@ -64,3 +64,15 @@ def test_cluster_bootstrap_resamples_groups():
     assert ci["point"] == pytest.approx(0.5)
     assert ci["low"] <= 0.5 <= ci["high"]
     assert ci["low"] in (0.0, 0.5) and ci["high"] in (0.5, 1.0)  # only whole sessions move
+
+
+def test_reliability_table_bins_by_max_probability():
+    from gaitlab.eval.metrics import reliability_table
+
+    p = np.array([[0.9, 0.1, 0, 0, 0], [0.15, 0.85, 0, 0, 0], [0.3, 0.3, 0.4, 0, 0]])
+    bins = reliability_table(p, [1, 1, 3], n_bins=10)
+    assert len(bins) == 10 and sum(b["count"] for b in bins) == 3
+    top = bins[8]  # (0.8, 0.9]
+    assert top["count"] == 2 and top["accuracy"] == 0.5
+    assert top["confidence"] == pytest.approx(0.875)
+    assert bins[0]["count"] == 0 and bins[0]["accuracy"] is None

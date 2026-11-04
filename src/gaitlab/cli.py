@@ -62,13 +62,23 @@ def _analyze_rows(
     standing_seq: KeypointSeq | None,
 ) -> tuple[list[dict], list[dict]]:
     """One clip → (strides rows, windows rows), each tagged with the sequence's synthetic flag."""
-    from gaitlab.gait.features import analyze_clip
+    from gaitlab.gait.features import analyze_clip, knee_cycle_curve
     from gaitlab.gait.windows import make_windows
 
     res = analyze_clip(seq, cfg, standing=standing_seq)
     flag = {"synthetic": seq.synthetic}
     strides = [
-        {"session_id": session_id, "clip_id": clip_id, **s.__dict__, **flag} for s in res.strides
+        {
+            "session_id": session_id,
+            "clip_id": clip_id,
+            "condition": condition,
+            **s.__dict__,
+            "knee_flex_cycle_deg": knee_cycle_curve(
+                res.xy_up, seq.t, res.side, s.ic_frame, s.next_ic_frame
+            ),
+            **flag,
+        }
+        for s in res.strides
     ]
     wins = make_windows(res.strides, session_id, clip_id, cfg.windows, condition, speed_kmh)
     return strides, [{**w.flat(), **flag} for w in wins]
@@ -193,6 +203,8 @@ def synth(
     o = Path(out)
     o.mkdir(parents=True, exist_ok=True)
     (o / "SYNTHETIC").write_text(SYNTHETIC_MARKER)
+    # The synthetic split is derived from these sessions; a split from an earlier run is stale.
+    (o / "splits.json").unlink(missing_ok=True)
     pd.DataFrame([{**w, "synthetic": True} for w in windows]).to_parquet(
         o / "windows.parquet", index=False
     )
@@ -239,16 +251,69 @@ def label(blind: int = typer.Option(0, help="blind re-grade N windows")) -> None
     _todo("labeling app (label.app)")
 
 
+SYN_ROOT = typer.Option("data/synthetic", "--root", help="gaitlab synth output folder")
+SYNTHETIC_ONLY = typer.Option(
+    False, "--synthetic", help="run on gaitlab synth output (required until real labels exist)"
+)
+
+
+def _require_synthetic(synthetic: bool, what: str) -> None:
+    if not synthetic:
+        typer.secho(
+            f"{what} on real labels needs data/labels/labels.csv and data/splits.json (M2). "
+            "Use --synthetic for the dry run.",
+            fg=typer.colors.YELLOW,
+        )
+        raise typer.Exit(code=2)
+
+
 @app.command()
-def baselines() -> None:
-    """Rules / logistic regression / LightGBM (TASKS M2)."""
-    _todo("baselines (models.baselines)")
+def baselines(
+    synthetic: bool = SYNTHETIC_ONLY, root: str = SYN_ROOT, config: str = CFG, features: str = FCFG
+) -> None:
+    """Rules / logistic regression / LightGBM: fit on train+dev sessions, predict test."""
+    import pandas as pd
+
+    from gaitlab.data.synthetic import load_synthetic_grader_inputs, synthetic_features_config
+    from gaitlab.eval.run_eval import PRED_COLUMNS
+    from gaitlab.models.baselines import baseline_predictions
+
+    _require_synthetic(synthetic, "baselines")
+    cfg = load_pipeline_config(config)
+    fcfg = synthetic_features_config(load_features_config(features))
+    windows, labels, split = load_synthetic_grader_inputs(root)
+    preds, meta = baseline_predictions(
+        windows, labels, split, fcfg, fcfg.feature_order, synthetic=True, seed=cfg.seed
+    )
+    out = Path(root) / "predictions"
+    out.mkdir(parents=True, exist_ok=True)
+    for name, rows in preds.items():
+        pd.DataFrame(rows, columns=PRED_COLUMNS).to_csv(out / f"{name}.csv", index=False)
+        if name in meta:
+            (out / f"{name}.meta.json").write_text(json.dumps(meta[name], indent=2) + "\n")
+    typer.echo(
+        f"{', '.join(preds)}: {meta['n_test_windows']} test windows "
+        f"({', '.join(meta['test_sessions'])}), fit on {meta['n_fit_windows']} → {out} (synthetic)"
+    )
 
 
 @app.command("build-sft")
-def build_sft() -> None:
-    """labels + windows → data/sft/*.jsonl by session split (TASKS M3)."""
-    _todo("build-sft (llm.sft_data + data.splits)")
+def build_sft(
+    synthetic: bool = SYNTHETIC_ONLY, root: str = SYN_ROOT, config: str = CFG, features: str = FCFG
+) -> None:
+    """labels + windows → SFT JSONL by session split (TASKS M3)."""
+    from gaitlab.data.synthetic import load_synthetic_grader_inputs
+    from gaitlab.llm.sft_data import build_records, write_jsonl
+
+    _require_synthetic(synthetic, "build-sft")
+    fcfg = load_features_config(features)
+    windows, labels, split = load_synthetic_grader_inputs(root)
+    records = build_records(windows, labels, split, fcfg.feature_order, synthetic=True)
+    out = Path(root) / "sft"
+    for part, recs in records.items():
+        write_jsonl(recs, out / f"{part}.jsonl")
+    counts = ", ".join(f"{k} {len(v)}" for k, v in records.items())
+    typer.echo(f"SFT records: {counts} → {out} (synthetic)")
 
 
 @app.command()
@@ -264,9 +329,32 @@ def predict(model: str = typer.Option("1b")) -> None:
 
 
 @app.command("eval")
-def eval_() -> None:
-    """All grader metrics → results/grader (TASKS M3)."""
-    _todo("eval (eval.run_eval)")
+def eval_(
+    synthetic: bool = SYNTHETIC_ONLY,
+    root: str = SYN_ROOT,
+    results: str = typer.Option("results", help="results root"),
+    n_boot: int | None = typer.Option(None, help="bootstrap resamples (default: config)"),
+    config: str = CFG,
+    features: str = FCFG,
+) -> None:
+    """Grader metrics for every model's test predictions → results/[synthetic/]grader."""
+    from gaitlab.config import config_hash
+    from gaitlab.data.synthetic import load_synthetic_grader_inputs
+    from gaitlab.eval.run_eval import run
+
+    _require_synthetic(synthetic, "eval")
+    cfg = load_pipeline_config(config)
+    fcfg = load_features_config(features)
+    load_synthetic_grader_inputs(root)  # writes <root>/splits.json if it isn't there yet
+    r = Path(root)
+    paths = run(
+        str(r / "predictions"), str(r / "labels.csv"), str(r / "splits.json"), synthetic=True,
+        tag_vocab=list(fcfg.tags), n_boot=n_boot or cfg.bootstrap.n, seed=cfg.seed,
+        config={"pipeline": config_hash(cfg), "features": config_hash(fcfg)},
+        results_root=results,
+    )  # fmt: skip
+    for p in paths.values():
+        typer.echo(f"→ {p}")
 
 
 @app.command()

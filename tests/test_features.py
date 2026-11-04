@@ -96,3 +96,17 @@ def test_unseen_far_side_foot_is_fine():
     res = analyze_clip(seq, cfg)
     assert len(res.strides) > 0
     assert np.isfinite(med(res.strides, "cadence_spm"))
+
+
+def test_knee_cycle_curve_resamples_ic_to_next_ic():
+    from gaitlab.gait.features import analyze_clip, knee_cycle_curve, knee_flexion_deg
+
+    seq, _ = synth_clip(duration_s=6.0)
+    an = analyze_clip(seq, PipelineConfig())
+    s = an.strides[1]
+    curve = knee_cycle_curve(an.xy_up, seq.t, an.side, s.ic_frame, s.next_ic_frame)
+    knee = knee_flexion_deg(an.xy_up, an.side)
+    assert curve.shape == (101,)
+    assert curve[0] == pytest.approx(knee[s.ic_frame])
+    assert curve[-1] == pytest.approx(knee[s.next_ic_frame])
+    assert curve.max() == pytest.approx(knee[s.ic_frame : s.next_ic_frame + 1].max(), abs=1.0)

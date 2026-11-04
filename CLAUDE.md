@@ -34,6 +34,7 @@ uv run gaitlab synth --n-sessions 6                              # synthetic dat
 5. **Thresholds are not guessed.** `configs/features.yaml` thresholds stay `null` until calibrated per `TECHNICAL_PLAN §5.5`, and the calibration gets an ADR. Rules and the verifier must raise `ThresholdsNotCalibrated` on real data while they're null.
 6. **Public data:** don't download, vendor or commit datasets on the user's behalf without them confirming the license. Don't copy code from GPL projects (e.g. OpenGait) into this repo.
 7. **Claims about tools:** the README lists only libraries actually imported by code that runs.
+8. **Stay in this repository.** Only read and write files inside this repository. Never create, move or edit files in other directories (e.g. ~/vip-tcn-training). If something seems to belong elsewhere, stop and ask.
 
 ## Conventions
 
