@@ -21,7 +21,13 @@ dependencies = [
 [project.optional-dependencies]
 video = ["av", "pillow"]
 mediapipe = ["mediapipe"]
-rtm = ["rtmlib", "sports2d", "onnxruntime-gpu"]
+# onnxruntime-gpu has no macOS wheels; Linux (the GPU host) gets the CUDA build, others the CPU one.
+rtm = [
+    "rtmlib",
+    "sports2d",
+    "onnxruntime-gpu; sys_platform == 'linux'",
+    "onnxruntime; sys_platform != 'linux'",
+]
 app = ["gradio"]
 ml = ["scikit-learn", "lightgbm"]
 # Install torch for your CUDA version first (pytorch.org), then this extra.

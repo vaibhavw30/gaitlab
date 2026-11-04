@@ -43,6 +43,13 @@ def knee_flexion_deg(xy_up: np.ndarray, side: str) -> np.ndarray:
     )
 
 
+def shin_angle_deg(xy_up: np.ndarray, side: str, d: int) -> np.ndarray:
+    """Per-frame shin angle from vertical (deg), positive when the ankle is ahead of the knee."""
+    sj = side_joints(side)
+    knee, ankle = xy_up[:, sj["knee"]], xy_up[:, sj["ankle"]]
+    return np.degrees(np.arctan2(d * (ankle[:, 0] - knee[:, 0]), knee[:, 1] - ankle[:, 1]))
+
+
 def stride_features(
     xy_up: np.ndarray,
     t: np.ndarray,
@@ -55,9 +62,9 @@ def stride_features(
 ) -> list[Stride]:
     """Compute one ``Stride`` per valid (ic, to, next_ic) triple. Pixels in, L/deg/s out."""
     sj = side_joints(side)
-    hip, knee, ankle = xy_up[:, sj["hip"]], xy_up[:, sj["knee"]], xy_up[:, sj["ankle"]]
-    heel, shoulder = xy_up[:, sj["heel"]], xy_up[:, sj["shoulder"]]
+    hip, heel, shoulder = xy_up[:, sj["hip"]], xy_up[:, sj["heel"]], xy_up[:, sj["shoulder"]]
     kflex = knee_flexion_deg(xy_up, side)
+    shin = shin_angle_deg(xy_up, side, d)
     fang = foot_angle_deg(xy_up, side, d)
     trunk = geometry.signed_angle_from_vertical_deg(hip, shoulder, d)
     needed_idx = [sj[p] for p in NEEDED]
@@ -68,9 +75,6 @@ def stride_features(
         stride_time = float(t[nxt] - t[ic])
         frame_dt = stride_time / (nxt - ic)
         contact_time = (to - ic + 1) * frame_dt
-        shin = float(
-            np.degrees(np.arctan2(d * (ankle[ic, 0] - knee[ic, 0]), knee[ic, 1] - ankle[ic, 1]))
-        )
         strike = float(fang[ic])
         calibrated = standing_offset_deg is not None
         if calibrated:
@@ -88,7 +92,7 @@ def stride_features(
                 duty_factor=contact_time / stride_time,
                 cadence_spm=120.0 / stride_time,
                 overstride_L=float(d * (heel[ic, 0] - hip[ic, 0]) / leg_len),
-                shin_angle_deg=shin,
+                shin_angle_deg=float(shin[ic]),
                 knee_flex_ic_deg=float(kflex[ic]),
                 knee_flex_peak_deg=float(np.nanmax(kflex[ic : to + 1])),
                 foot_strike_deg=strike,
@@ -103,11 +107,14 @@ def stride_features(
 
 @dataclass
 class ClipAnalysis:
+    """One clip's analysis. ``xy_up``: feature-filtered keypoints (T, J, 2), y-up px."""
+
     side: str
     d: int
     leg_len_px: float
     events: Events
     strides: list[Stride]
+    xy_up: np.ndarray | None = None
 
 
 def analyze_clip(
@@ -134,4 +141,6 @@ def analyze_clip(
         st = clean_keypoints(standing.xy, standing.vis, standing.fps, cfg.clean, for_features=True)
         offset = foot_strike_offset_from_standing(geometry.to_y_up(st, standing.size[1]), side, d)
     strides = stride_features(xy_ft, seq.t, side, d, leg_len, events, cfg, offset)
-    return ClipAnalysis(side=side, d=d, leg_len_px=leg_len, events=events, strides=strides)
+    return ClipAnalysis(
+        side=side, d=d, leg_len_px=leg_len, events=events, strides=strides, xy_up=xy_ft
+    )

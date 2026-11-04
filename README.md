@@ -45,10 +45,18 @@ Gemma weights need the Gemma license accepted on Hugging Face (`huggingface-cli 
 ```bash
 gaitlab extract --session 20261105-01 --backend mediapipe
 gaitlab process --session 20261105-01
-gaitlab overlay --clip 20261105-01/natural --gif
+gaitlab overlay --clip data/interim/20261105-01/natural.mediapipe.npz --video data/raw/20261105-01/natural.mp4 --gif
 gaitlab label                      # labeling app; --blind 40 for the re-grade
 gaitlab build-sft && gaitlab train --model 1b && gaitlab predict --model 1b
 gaitlab eval && gaitlab bench --trt && gaitlab report
+```
+
+No video yet? Dry-run the chain on synthetic keypoints (all outputs flagged synthetic, never reported):
+
+```bash
+gaitlab synth --n-sessions 6 --write-keypoints
+gaitlab process --session 20260101-01 --sessions data/synthetic/sessions.csv --backend synthetic
+gaitlab overlay --clip data/synthetic/interim/20260101-01/natural.synthetic.npz --gif
 ```
 
 ## Data

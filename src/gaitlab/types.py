@@ -47,6 +47,14 @@ class KeypointSeq:
     def n_frames(self) -> int:
         return int(self.xy.shape[0])
 
+    @property
+    def synthetic(self) -> bool:
+        """True for generated keypoints (``backend == "synthetic"`` or ``meta["synthetic"]``).
+
+        Anything derived from a synthetic sequence must be flagged synthetic (CLAUDE.md rule 3).
+        """
+        return self.backend == "synthetic" or self.meta.get("synthetic") is True
+
     def save(self, path: str) -> None:
         import json
 

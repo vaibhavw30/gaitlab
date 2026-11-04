@@ -69,7 +69,7 @@ gaitlab/
 ## 3. Environment
 
 - Linux or WSL2 Ubuntu, NVIDIA driver + CUDA matching the installed PyTorch wheel. TensorRT-LLM dropped Windows support at v0.18 and Torch-TensorRT on Windows is Dynamo-only, so don't target native Windows.
-- Python 3.11 via `uv`. Base dependencies are NumPy, SciPy, pandas, pyarrow, PyYAML, pydantic, Typer and Rich. Extras: `video`, `mediapipe`, `rtm`, `app`, `ml`, `llm`, `trt`, `viz`, `dev`. CI installs base + `ml` + `dev` only.
+- Python 3.11 via `uv`. Base dependencies are NumPy, SciPy, pandas, pyarrow, PyYAML, pydantic, Typer and Rich. Extras: `video`, `mediapipe`, `rtm`, `app`, `ml`, `llm`, `trt`, `viz`, `dev`. CI installs base + `video` + `ml` + `dev` only.
 - Pin versions with `uv lock` after the first working install. Record versions in every result file (§9).
 - Models: MediaPipe `pose_landmarker_heavy.task` (scripts/download_models.sh); `google/gemma-3-1b-it` and `google/gemma-3-270m-it` from Hugging Face (accept the Gemma license first).
 
@@ -100,11 +100,11 @@ Downstream code converts to **y-up** once via `gait.geometry.to_y_up()`.
 
 ### 4.3 Strides (`data/processed/<session>/strides.parquet`)
 
-One row per near-side stride: `session_id, clip_id, stride_idx, side, ic_frame, to_frame, next_ic_frame, t_ic, stride_time_s, contact_time_s, duty_factor, cadence_spm, overstride_L, shin_angle_deg, knee_flex_ic_deg, knee_flex_peak_deg, foot_strike_deg, foot_strike_calibrated (bool), vert_osc_L, trunk_lean_deg, quality`.
+One row per near-side stride: `session_id, clip_id, stride_idx, side, ic_frame, to_frame, next_ic_frame, t_ic, stride_time_s, contact_time_s, duty_factor, cadence_spm, overstride_L, shin_angle_deg, knee_flex_ic_deg, knee_flex_peak_deg, foot_strike_deg, foot_strike_calibrated (bool), vert_osc_L, trunk_lean_deg, quality, synthetic (bool)`. `synthetic` is True when the KeypointSeq was generated (`KeypointSeq.synthetic`); such outputs also get a `SYNTHETIC` marker file in their folder ([ADR-0011](adr/0011-no-video-path-synthetic-keypoints-single-clip-overlay.md)).
 
 ### 4.4 Windows (`data/processed/<session>/windows.parquet`)
 
-`window_id = f"{session_id}:{clip_id}:{start_stride}"`, `session_id, clip_id, condition, start_stride, n_strides, t_start, t_end, speed_kmh, quality`, then `<feature>_med` and `<feature>_iqr` for each feature in §5.3.
+`window_id = f"{session_id}:{clip_id}:{start_stride}"`, `session_id, clip_id, condition, start_stride, n_strides, t_start, t_end, speed_kmh, quality`, then `<feature>_med` and `<feature>_iqr` for each feature in §5.3, then `synthetic` (bool, as in §4.3).
 
 ### 4.5 Labels (`data/labels/labels.csv`)
 
@@ -249,8 +249,9 @@ Metric definitions, splits and protocol live in [EVALUATION.md](EVALUATION.md). 
 | Command | Does |
 |---|---|
 | `extract --backend {mediapipe,rtmpose} --session S` | video → KeypointSeq npz |
-| `process --session S` | clean → events → strides.parquet → windows.parquet |
-| `overlay --clip C [--gif]` | skeleton + contacts + angles video |
+| `process --session S [--sessions CSV]` | clean → events → strides.parquet → windows.parquet for every clip of S. Reads `<CSV dir>/interim/S/<clip>.<backend>.npz`, writes `<CSV dir>/processed/S/` |
+| `process --clip NPZ` | the same for one KeypointSeq with no sessions row: session = the npz's folder name, clip = file name up to the first dot, condition inferred from the clip id. Writes `<clip>.strides.parquet` and `<clip>.windows.parquet` to `data/processed/<session>/` (`data/synthetic/processed/<session>/` for synthetic keypoints) unless `--out` |
+| `overlay --clip NPZ [--video MP4] [--gif]` | skeleton + IC/TO markers + near-side knee and shin angles, on the video or on a plain canvas of `KeypointSeq.size`. Default output `<npz stem>.overlay.{mp4,gif}` |
 | `label [--blind N]` | launch labeling app |
 | `baselines` | fit and predict rules / LR / LightGBM |
 | `build-sft` | labels + windows → SFT JSONL (session split) |
@@ -260,14 +261,14 @@ Metric definitions, splits and protocol live in [EVALUATION.md](EVALUATION.md). 
 | `validate {biocv,mocap}` | event and feature validation → results/validation |
 | `bench [--trt]` | latency and TensorRT → results/bench |
 | `report` | regenerate the README results table |
-| `synth --n-sessions K` | synthetic sessions + rule labels for dry runs (`synthetic=True`) |
+| `synth --n-sessions K [--write-keypoints]` | synthetic sessions + rule labels for dry runs (`synthetic=True`). `--write-keypoints` also saves each clip as `data/synthetic/interim/<session>/<clip>.synthetic.npz` plus `data/synthetic/sessions.csv` (§4.6 schema + `synthetic` column) |
 | `app` | coach demo app |
 
 ## 11. Testing and CI
 
 - `tests/` mirrors `src/`. Synthetic gait (`data/synthetic.py`) is the main fixture: a 2D kinematic runner with **known** cadence, contact frames and per-stride geometry, plus a noise model (Gaussian jitter, dropouts, occasional left/right swaps).
 - Markers: `gpu` (skipped in CI), `slow`, `data` (needs downloaded public data; skipped in CI).
-- CI (`.github/workflows/ci.yml`): `uv sync --extra ml --extra dev`, `ruff check`, `ruff format --check`, `pytest -m "not gpu and not data"`, plus `scripts/check_readme_numbers.py`.
+- CI (`.github/workflows/ci.yml`): `uv sync --extra video --extra ml --extra dev`, `ruff check`, `ruff format --check`, `pytest -m "not gpu and not data"`, plus `scripts/check_readme_numbers.py`.
 - Each milestone's tests are listed in [TASKS.md](TASKS.md). A milestone is done when its tests pass and its result files exist.
 
 ## 12. Evidence base

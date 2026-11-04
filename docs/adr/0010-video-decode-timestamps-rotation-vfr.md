@@ -21,4 +21,4 @@ TECHNICAL_PLAN §4.2 and the `io/video.py` contract fix the essentials: timing f
 - `probe` reads the whole file once (demux only, no decode). That's cheap next to pose estimation.
 - Jitter of one tick is not reported as VFR even when one tick exceeds 1 % of the period. Downstream timing uses the `t` array regardless (TECHNICAL_PLAN §5.3), so the flag is informational.
 - Videos with mirrored display matrices would come out unflipped. If one shows up, add the flip and a test.
-- The PyAV tests are skipped when the `video` extra isn't installed. CI installs base + `ml` + `dev` only (TECHNICAL_PLAN §11), so CI doesn't exercise them unless `--extra video` is added to `ci.yml`.
+- The PyAV tests are skipped when the `video` extra isn't installed. CI installs `--extra video` so they run there.

@@ -37,13 +37,15 @@ class LabelRow(BaseModel):
     labeled_at: datetime
 
 
-def _blank_to_none(row: dict[str, str]) -> dict[str, str | None]:
-    return {k: (v if v != "" else None) for k, v in row.items()}
+def _drop_blank(row: dict[str, str]) -> dict[str, str]:
+    """Blank CSV cells → field defaults (None for optional numbers, "" for text)."""
+    return {k: v for k, v in row.items() if v not in ("", None)}
 
 
 def load_sessions(path: str | Path = "data/sessions.csv") -> list[SessionRow]:
+    """Rows of a sessions CSV. Extra columns (e.g. ``synthetic``) are ignored."""
     with open(path, newline="") as f:
-        return [SessionRow.model_validate(_blank_to_none(r)) for r in csv.DictReader(f)]
+        return [SessionRow.model_validate(_drop_blank(r)) for r in csv.DictReader(f)]
 
 
 def load_labels(path: str | Path = "data/labels/labels.csv") -> list[LabelRow]:

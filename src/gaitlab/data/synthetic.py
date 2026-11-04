@@ -20,6 +20,7 @@ Model (sagittal plane, metres, x = forward along the facing direction, y = up, h
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 import numpy as np
 
@@ -316,30 +317,37 @@ def synthetic_features_config(base):
     return cfg
 
 
-def synthetic_sessions(
+@dataclass
+class SyntheticClip:
+    """One generated clip of a synthetic session (``gaitlab synth``)."""
+
+    session_id: str
+    date: str  # ISO date
+    clip_id: str
+    condition: str
+    speed_kmh: float
+    seq: KeypointSeq
+
+
+SYNTHETIC_SPEED_KMH = 12.0
+"""Speed written to synthetic windows and session rows (km/h)."""
+
+
+def synthetic_session_clips(
     n_sessions: int,
-    pipeline_cfg,
-    features_cfg,
     seed: int = 0,
     clip_seconds: float = 32.0,
     fps: float = 120.0,
-) -> tuple[list[dict], list[dict], list[dict]]:
-    """Generate sessions × conditions → windows rows, rule labels and session rows.
+) -> list[SyntheticClip]:
+    """Generate sessions × conditions as keypoint clips (noise on), all marked synthetic.
 
-    Each session perturbs the base gait slightly; noise is on. Returns (windows, labels,
-    sessions), all marked synthetic. ``features_cfg`` must already have thresholds
-    (use ``synthetic_features_config``).
+    Each session perturbs the base gait slightly and picks a random facing direction. Session ids
+    are weekly dates from 2026-01-01 (``YYYYMMDD-01``); clip id = condition.
     """
     import datetime as dt
 
-    from gaitlab.gait.features import analyze_clip
-    from gaitlab.gait.windows import make_windows
-    from gaitlab.models.rules import rules_predict
-
     rng = np.random.default_rng(seed)
-    windows: list[dict] = []
-    labels: list[dict] = []
-    sessions: list[dict] = []
+    clips: list[SyntheticClip] = []
     for s in range(n_sessions):
         day = dt.date(2026, 1, 1) + dt.timedelta(days=7 * s)
         sid = f"{day:%Y%m%d}-01"
@@ -351,31 +359,103 @@ def synthetic_sessions(
             direction=int(rng.choice([-1, 1])),
         )
         for cond in CONDITIONS:
-            p = condition_params(base, cond)
             seq, _ = synth_clip(
-                p,
+                condition_params(base, cond),
                 fps=fps,
                 duration_s=clip_seconds,
                 noise=NoiseParams(jitter_px=3.0, dropout_frac=0.01, seed=int(rng.integers(1e9))),
             )
-            analysis = analyze_clip(seq, pipeline_cfg)
-            for w in make_windows(analysis.strides, sid, cond, pipeline_cfg.windows, cond, 12.0):
-                row = w.flat()
-                grade, tags = rules_predict(row, features_cfg)  # type: ignore[arg-type]
-                cue = CUE_TEMPLATES[tags[0]] if tags else ""
-                windows.append(row)
-                labels.append(
-                    {
-                        "window_id": w.window_id,
-                        "grade": grade,
-                        "tags": ";".join(tags),
-                        "cue": cue,
-                        "rater": "synthetic",
-                        "mode": "normal",
-                        "labeled_at": f"{day.isoformat()}T12:00:00",
-                    }
-                )
-            sessions.append(
-                {"session_id": sid, "date": day.isoformat(), "clip_id": cond, "synthetic": True}
+            seq.meta.update({"session_id": sid, "clip_id": cond, "condition": cond})
+            clips.append(SyntheticClip(sid, day.isoformat(), cond, cond, SYNTHETIC_SPEED_KMH, seq))
+    return clips
+
+
+def synthetic_sessions(
+    n_sessions: int,
+    pipeline_cfg,
+    features_cfg,
+    seed: int = 0,
+    clip_seconds: float = 32.0,
+    fps: float = 120.0,
+    clips: list[SyntheticClip] | None = None,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Analyze synthetic clips → windows rows, rule labels and session rows.
+
+    Clips come from ``synthetic_session_clips(n_sessions, seed, clip_seconds, fps)`` unless
+    passed in. Returns (windows, labels, sessions), all marked synthetic. ``features_cfg`` must
+    already have thresholds (use ``synthetic_features_config``).
+    """
+    from gaitlab.gait.features import analyze_clip
+    from gaitlab.gait.windows import make_windows
+    from gaitlab.models.rules import rules_predict
+
+    if clips is None:
+        clips = synthetic_session_clips(n_sessions, seed, clip_seconds, fps)
+    windows: list[dict] = []
+    labels: list[dict] = []
+    sessions: list[dict] = []
+    for c in clips:
+        analysis = analyze_clip(c.seq, pipeline_cfg)
+        wins = make_windows(
+            analysis.strides, c.session_id, c.clip_id, pipeline_cfg.windows, c.condition,
+            c.speed_kmh,
+        )  # fmt: skip
+        for w in wins:
+            row = w.flat()
+            grade, tags = rules_predict(row, features_cfg)  # type: ignore[arg-type]
+            cue = CUE_TEMPLATES[tags[0]] if tags else ""
+            windows.append(row)
+            labels.append(
+                {
+                    "window_id": w.window_id,
+                    "grade": grade,
+                    "tags": ";".join(tags),
+                    "cue": cue,
+                    "rater": "synthetic",
+                    "mode": "normal",
+                    "labeled_at": f"{c.date}T12:00:00",
+                }
             )
+        sessions.append(
+            {"session_id": c.session_id, "date": c.date, "clip_id": c.clip_id, "synthetic": True}
+        )
     return windows, labels, sessions
+
+
+def save_synthetic_keypoints(clips: list[SyntheticClip], root: str | Path) -> Path:
+    """Write each clip as ``<root>/interim/<session>/<clip>.synthetic.npz`` plus a sessions CSV.
+
+    ``<root>/sessions.csv`` follows the ``data/sessions.csv`` schema (TECHNICAL_PLAN §4.6) with
+    ``path`` pointing at the npz, and one extra column ``synthetic`` (always true), so
+    ``gaitlab process --session S --sessions <root>/sessions.csv --backend synthetic`` runs on it.
+    Returns the CSV path.
+    """
+    import csv
+
+    from gaitlab.data.sessions import SessionRow
+
+    root = Path(root)
+    rows = []
+    for c in clips:
+        if not c.seq.synthetic:
+            raise ValueError(f"{c.session_id}/{c.clip_id}: not marked synthetic")
+        path = root / "interim" / c.session_id / f"{c.clip_id}.synthetic.npz"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        c.seq.save(str(path))
+        row = SessionRow(
+            session_id=c.session_id,
+            date=c.date,
+            clip_id=c.clip_id,
+            path=str(path),
+            condition=c.condition,
+            speed_kmh=c.speed_kmh,
+            fps=c.seq.fps,
+            notes="synthetic keypoints (gaitlab synth --write-keypoints); never report",
+        )
+        rows.append({**row.model_dump(mode="json"), "synthetic": True})
+    out = root / "sessions.csv"
+    with open(out, "w", newline="") as f:
+        wr = csv.DictWriter(f, fieldnames=[*SessionRow.model_fields, "synthetic"])
+        wr.writeheader()
+        wr.writerows([{k: ("" if v is None else v) for k, v in r.items()} for r in rows])
+    return out

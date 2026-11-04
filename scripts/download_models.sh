@@ -6,7 +6,9 @@ set -euo pipefail
 mkdir -p models
 URL="https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task"
 curl -fL "$URL" -o models/pose_landmarker_heavy.task
-sha256sum models/pose_landmarker_heavy.task | tee models/pose_landmarker_heavy.task.sha256
+# sha256sum on Linux, shasum on macOS
+if command -v sha256sum >/dev/null; then SHA="sha256sum"; else SHA="shasum -a 256"; fi
+$SHA models/pose_landmarker_heavy.task | tee models/pose_landmarker_heavy.task.sha256
 echo "Saved models/pose_landmarker_heavy.task"
 # RTMPose (rtmlib) downloads its ONNX models on first use into its own cache.
 # Gemma weights come from Hugging Face on first `gaitlab train` (accept the license first).

@@ -4,6 +4,8 @@ Work top to bottom. A task is done when its listed tests pass and any listed res
 
 Legend: `[x]` done · `[~]` scaffolded, needs review against real data · `[ ]` to do
 
+**Where work runs.** Development is on macOS (Apple Silicon, no NVIDIA GPU). M0–M2 run locally on CPU. The GPU host for M3–M4 is not decided yet (first item under M3). Until it is, GPU code stays behind `@pytest.mark.gpu`, and CPU code paths never import `torch` (or anything that pulls it in) at module level: import inside the function that needs it.
+
 ---
 
 ## Setup (first session with Claude Code)
@@ -12,8 +14,8 @@ The scaffold was tested with pytest on synthetic data (71 tests passing, Python 
 
 - [x] `git init && git add -A && git commit -m "scaffold"` (before any tool rewrites files)
 - [x] `uv python install 3.11 && uv sync --extra video --extra ml --extra viz --extra dev && uv lock`
-- [ ] `uv run ruff check --fix . && uv run ruff format .`, then `uv run pytest -m "not gpu and not data"`; commit
-- [ ] `uv run gaitlab --help` and `uv run gaitlab synth --n-sessions 6` work
+- [x] `uv run ruff check --fix . && uv run ruff format .`, then `uv run pytest -m "not gpu and not data"`; commit
+- [x] `uv run gaitlab --help` and `uv run gaitlab synth --n-sessions 6` work
 - [ ] Create the GitHub repo, push, confirm CI is green (user task: repo name, visibility, description)
 
 ## M0 — Stand-in data (before your own recordings)
@@ -31,10 +33,10 @@ Goal: the whole pipeline runs on other people's running and on synthetic data, s
 - [~] **Results provenance + README table + claim check** — `report/results.py`, `report/readme_table.py`, `scripts/check_readme_numbers.py`. Tests: `test_results.py`
 - [~] **Prompt, SFT builder, verifier, rules, splits** — `llm/prompt.py`, `llm/sft_data.py`, `llm/verifier.py`, `models/rules.py`, `data/splits.py`. Tests: `test_prompt.py`, `test_verifier.py`, `test_splits.py`
 - [x] **Video decode** — `io/video.py` (PyAV, PTS timestamps, fps check, rotation, VFR flag; ADR-0010). Test: `test_video.py` with tiny generated clips (PyAV encodes them in-test)
-- [ ] **MediaPipe backend** — `pose/mediapipe_backend.py` (Tasks API `PoseLandmarker`, VIDEO running mode, heavy model). Smoke test on a Mixkit clip (`@pytest.mark.data`)
+- [ ] **MediaPipe backend** — `pose/mediapipe_backend.py` (Tasks API `PoseLandmarker`, VIDEO running mode, heavy model). Smoke test on own clip `data/raw/SMOKE/natural.mp4` (`@pytest.mark.data`)
 - [ ] **RTMPose backend** — `pose/rtmpose_backend.py` via rtmlib `Body` (Halpe-26 / body7 model). Same smoke test
-- [ ] **Overlay** — `viz/overlay.py`: skeleton, contact markers, knee/shin angle text → mp4 and GIF
-- [ ] **CLI wiring** — `extract`, `process`, `overlay`, `synth` in `cli.py`
+- [x] **Overlay** — `viz/overlay.py`: skeleton, contact markers, knee/shin angle text → mp4 and GIF; video background optional (plain canvas from `KeypointSeq.size`). Tests: `test_overlay.py` (ADR-0011)
+- [ ] **CLI wiring** — `extract`, `process`, `overlay`, `synth` in `cli.py`. Done: `synth --write-keypoints`, `process --session/--clip`, `overlay --clip [--video] [--gif]` (`test_cli.py`, ADR-0011). Left: `extract`
 - [ ] **Synthetic dry run** — `gaitlab synth --n-sessions 6` → strides, windows, rule labels (`synthetic=True`) → `baselines` → `eval` writes to `results/synthetic/`
 - [ ] **Mocap projection** — `data/mocap.py` for Fukuchi 2017 (smallest; CC-BY) then Running Injury Clinic. → `results/validation/mocap_features.json` (V3)
 - [ ] **BioCV loader + event validation** — `data/biocv.py`; `gaitlab validate biocv` → `results/validation/biocv_events.json` (V1), `biocv_angles.json` (V2). **Confirm the license with the user first.**
@@ -62,6 +64,7 @@ Goal: the whole pipeline runs on other people's running and on synthetic data, s
 
 ## M3 — Grader
 
+- [ ] Decide GPU host for M3–M4 (own NVIDIA machine / cloud GPU / lab cluster with PI approval)
 - [ ] `llm/grade.py`: chat-template rendering, single-token assertion for " 1"…" 5", logit scoring, greedy tags + cue
 - [ ] `llm/train_lora.py` (TRL SFTTrainer, assistant-only loss) for `gemma-3-1b-it` and `gemma-3-270m-it` (`@pytest.mark.gpu` smoke test with 4 steps)
 - [ ] Zero-shot 1B predictions

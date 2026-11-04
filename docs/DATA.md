@@ -20,7 +20,12 @@ data/
 │   ├── cmu_mocap/
 │   ├── guo2026/
 │   └── stock/                   # Mixkit clips for smoke tests
-└── manifest.json                # sha256 of every file used by a run → data_manifest_hash
+├── manifest.json                # sha256 of every file used by a run → data_manifest_hash
+└── synthetic/                   # gaitlab synth output; SYNTHETIC marker; never reported
+    ├── windows.parquet, labels.csv, sessions.json
+    ├── sessions.csv             # with --write-keypoints; path → the npz below
+    ├── interim/<session_id>/<clip_id>.synthetic.npz
+    └── processed/<session_id>/  # gaitlab process on synthetic keypoints
 ```
 
 `session_id` = `YYYYMMDD-NN` (e.g. `20261105-01`). `clip_id` = `<condition>` or `<condition>-<n>`.
@@ -77,3 +82,14 @@ Projected sequences are `backend="mocap_proj"`. Their features come with exact r
 ## 5. Synthetic data
 
 `gaitlab synth` builds sessions from `data/synthetic.py` with random but known gait parameters per condition, plus rule-derived labels. All synthetic artifacts carry `synthetic=True` and land in `results/synthetic/`. They exist to dry-run the pipeline before your labels exist and are never reported.
+
+With no video at all, the whole chain runs on synthetic keypoints ([ADR-0011](adr/0011-no-video-path-synthetic-keypoints-single-clip-overlay.md)):
+
+```bash
+uv run gaitlab synth --n-sessions 6 --write-keypoints
+uv run gaitlab process --session 20260101-01 --sessions data/synthetic/sessions.csv --backend synthetic
+uv run gaitlab process --clip data/synthetic/interim/20260101-01/natural.synthetic.npz
+uv run gaitlab overlay --clip data/synthetic/interim/20260101-01/natural.synthetic.npz --gif
+```
+
+Every output carries the flag: npz `backend="synthetic"` and `meta.synthetic`, a `synthetic` column in the CSV and parquet files, `SYNTHETIC` marker files, and a SYNTHETIC watermark on overlay frames.
