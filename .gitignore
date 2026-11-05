@@ -32,3 +32,6 @@ build/
 
 # Hugging Face cache (HF_HOME) kept inside the repo, CLAUDE.md rule 8
 .hf_cache/
+
+# Slurm job logs pulled back from DeltaAI (scripts/cluster/rsync-down.sh)
+/logs/

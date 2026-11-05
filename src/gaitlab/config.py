@@ -139,6 +139,28 @@ class TrainLoraConfig(_Strict):
     logging: LoggingCfg = Field(default_factory=LoggingCfg)
 
 
+class TrtCfg(_Strict):
+    ir: Literal["dynamo"] = "dynamo"
+    optimization_level: int = 3
+    parity_required: float = 1.0  # fraction of test prompts with identical argmax grade
+
+
+class BenchConfig(_Strict):
+    """configs/bench.yaml (EVALUATION §4, ADR-0004)."""
+
+    warmup_iters: int = 20
+    measure_iters: int = 200
+    batch_sizes: list[int] = Field(default_factory=lambda: [1, 16])
+    precision: Literal["fp16", "bf16"] = "fp16"
+    clip: str = "data/raw/BENCH/natural.mp4"
+    stages: list[str] = Field(
+        default_factory=lambda: [
+            "decode", "pose", "clean_events_features", "scoring_pass", "generate",
+        ]
+    )  # fmt: skip
+    trt: TrtCfg = Field(default_factory=TrtCfg)
+
+
 def load_yaml(path: str | Path) -> dict[str, Any]:
     with open(path) as f:
         return yaml.safe_load(f) or {}
@@ -154,6 +176,10 @@ def load_features_config(path: str | Path = "configs/features.yaml") -> Features
 
 def load_train_lora_config(path: str | Path = "configs/train_lora.yaml") -> TrainLoraConfig:
     return TrainLoraConfig.model_validate(load_yaml(path))
+
+
+def load_bench_config(path: str | Path = "configs/bench.yaml") -> BenchConfig:
+    return BenchConfig.model_validate(load_yaml(path))
 
 
 def config_hash(cfg: BaseModel | dict[str, Any]) -> str:

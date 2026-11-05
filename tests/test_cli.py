@@ -209,6 +209,25 @@ def test_train_refuses_synthetic_sft_without_allow_synthetic(grader_dir: Path):
     assert "allow-synthetic" in res.output or "allow_synthetic" in str(res.exception)
 
 
+def test_bench_without_trt_points_at_the_unwritten_latency_pipeline():
+    res = runner.invoke(app, ["bench"])
+    assert res.exit_code == 2 and "B1" in res.output
+
+
+def test_bench_trt_refuses_a_synthetic_flag_mismatch(grader_dir: Path, tmp_path: Path):
+    sft = grader_dir / "synthetic" / "sft"
+    res = runner.invoke(app, ["bench", "--trt", "--sft-dir", str(sft)])
+    assert res.exit_code == 2 and "--synthetic" in res.output
+    real = tmp_path / "sft"
+    real.mkdir()
+    lines = (sft / "test.jsonl").read_text().splitlines()
+    (real / "test.jsonl").write_text(
+        "".join(json.dumps({**json.loads(x), "synthetic": False}) + "\n" for x in lines)
+    )
+    res = runner.invoke(app, ["bench", "--trt", "--synthetic", "--sft-dir", str(real)])
+    assert res.exit_code == 2 and "not synthetic" in res.output
+
+
 _LLM_READY = all(importlib.util.find_spec(m) for m in ("torch", "transformers", "peft", "trl"))
 
 

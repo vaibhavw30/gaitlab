@@ -1,11 +1,11 @@
 """Stage timing (EVALUATION B1). TASKS M4.
 
 ``cpu_time(fn, warmup, iters) -> dict`` is implemented (perf_counter) for CPU stages.
-``cuda_time(fn, warmup, iters) -> dict`` uses ``torch.cuda.Event(enable_timing=True)`` around each
-call with ``torch.cuda.synchronize()``; returns ms p50/p95/mean and peak memory via
-``torch.cuda.max_memory_allocated`` (reset before measuring). To implement in M4.
-``bench_pipeline(clip, cfg)`` times decode, pose, clean+events+features, scoring pass and generate
-on the fixed clip and computes end-to-end fps = frames / total seconds.
+``cuda_time(fn, warmup, iters) -> dict`` (implemented) uses ``torch.cuda.Event(enable_timing=True)``
+around each call and synchronizes before reading; returns ms p50/p95/mean plus ``peak_mem_mb`` from
+``torch.cuda.max_memory_allocated`` (reset after warmup, before measuring). Raises without CUDA.
+``bench_pipeline(clip, cfg)`` (not yet written) times decode, pose, clean+events+features, scoring
+pass and generate on the fixed clip and computes end-to-end fps = frames / total seconds.
 """
 
 from __future__ import annotations
@@ -38,4 +38,24 @@ def cpu_time(fn: Callable[[], object], warmup: int = 5, iters: int = 50) -> dict
 
 
 def cuda_time(fn: Callable[[], object], warmup: int = 20, iters: int = 200) -> dict[str, float]:
-    raise NotImplementedError("TASKS.md M4: CUDA-event timing")
+    """Time ``fn`` on the current CUDA device: ms per call, CUDA events, sync before each read."""
+    import torch
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("cuda_time needs a CUDA device; use cpu_time for CPU stages")
+    for _ in range(warmup):
+        fn()
+    torch.cuda.synchronize()
+    torch.cuda.reset_peak_memory_stats()
+    samples = []
+    for _ in range(iters):
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        fn()
+        end.record()
+        torch.cuda.synchronize()
+        samples.append(float(start.elapsed_time(end)))
+    out = summarize_ms(samples)
+    out["peak_mem_mb"] = torch.cuda.max_memory_allocated() / 2**20
+    return out

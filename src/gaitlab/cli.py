@@ -464,9 +464,70 @@ def validate(target: str = typer.Argument(..., help="biocv | mocap")) -> None:
 
 
 @app.command()
-def bench(trt: bool = False) -> None:
-    """Latency and TensorRT benchmarks (TASKS M4)."""
-    _todo("bench (bench.latency, bench.trt)")
+def bench(
+    trt: bool = typer.Option(False, "--trt", help="B2: TensorRT vs eager grade scoring pass"),
+    synthetic: bool = typer.Option(
+        False, "--synthetic", help="dry run on synthetic SFT prompts → results/synthetic/bench"
+    ),
+    model: str = typer.Option("1b", help="1b | 270m"),
+    sft_dir: str | None = typer.Option(
+        None, "--sft-dir", help="default data/sft (data/synthetic/sft with --synthetic)"
+    ),
+    adapter: str | None = typer.Option(None, help="run dir; default: newest matching run"),
+    zero_shot: bool = typer.Option(False, "--zero-shot", help="no adapter"),
+    runs_root: str = typer.Option("runs", "--runs"),
+    bench_config: str = typer.Option("configs/bench.yaml", "--bench-config"),
+    lora_config: str = LORA_CFG,
+    results: str = typer.Option("results", help="results root"),
+) -> None:
+    """Benchmarks (TASKS M4). ``--trt``: B2 on the SFT test prompts → results/[synthetic/]bench."""
+    from gaitlab.bench.trt import read_test_prompts
+
+    if not trt:
+        _todo("bench latency pipeline (bench.latency.bench_pipeline, B1); use --trt for B2")
+    sft = Path(sft_dir or ("data/synthetic/sft" if synthetic else "data/sft"))
+    prompts, test_synthetic = read_test_prompts(sft / "test.jsonl")
+    if test_synthetic != synthetic:
+        msg = (
+            f"{sft}/test.jsonl is synthetic; pass --synthetic (results go to results/synthetic)"
+            if test_synthetic
+            else f"{sft}/test.jsonl is not synthetic; drop --synthetic"
+        )
+        typer.secho(msg, fg=typer.colors.RED)
+        raise typer.Exit(code=2)
+
+    from gaitlab.bench.trt import bench_scoring
+    from gaitlab.config import config_hash, load_bench_config, load_train_lora_config
+    from gaitlab.llm.grade import llm_model_name, load_grader
+    from gaitlab.llm.train_lora import latest_run
+    from gaitlab.report.results import manifest_hash, write_result
+
+    lcfg = load_train_lora_config(lora_config)
+    bcfg = load_bench_config(bench_config)
+    if model not in lcfg.models:
+        raise typer.BadParameter(f"--model must be one of {sorted(lcfg.models)}")
+    run_meta: dict = {}
+    adapter_path = None
+    if not zero_shot:
+        run_dir = Path(adapter) if adapter else latest_run(runs_root, model, synthetic=synthetic)
+        run_meta = json.loads((run_dir / "run.json").read_text())
+        if run_meta["model_key"] != model or run_meta["synthetic"] is not synthetic:
+            raise typer.BadParameter(f"{run_dir} doesn't match --model/--synthetic")
+        adapter_path = str(run_dir / "adapter")
+    grader = load_grader(lcfg.models[model], adapter_path, cfg=lcfg, device="cuda")
+    metrics = bench_scoring(grader, prompts, bcfg)
+    metrics.update(
+        model=llm_model_name(model, zero_shot), run_id=run_meta.get("run_id"),
+        grader={**grader.meta()},
+    )  # fmt: skip
+    path = write_result(
+        "bench", "trt", metrics,
+        config={"bench": config_hash(bcfg), "lora": config_hash(lcfg),
+                "train": run_meta.get("config_hash")},
+        data_manifest=manifest_hash([sft / "test.jsonl"]), synthetic=synthetic,
+        notes="Grade scoring pass only (ADR-0004); cue generation stays eager.", root=results,
+    )  # fmt: skip
+    typer.echo(f"B2 → {path}" + (" (synthetic)" if synthetic else ""))
 
 
 @app.command()

@@ -74,8 +74,8 @@ Goal: the whole pipeline runs on other people's running and on synthetic data, s
 
 ## M4 — Speed and polish
 
-- [ ] `bench/latency.py` → `results/bench/stages.json` (B1)
-- [ ] `bench/trt.py` (Torch-TensorRT scoring wrapper, parity gate) → `results/bench/trt.json` (B2)
+- [~] `bench/latency.py` → `results/bench/stages.json` (B1). Done: `cuda_time` (`test_bench.py`; gpu test written, not yet run). Left: `bench_pipeline` and the fixed clip
+- [~] `bench/trt.py` (Torch-TensorRT scoring wrapper, parity gate) → `results/bench/trt.json` (B2). Done: `bench_scoring`, parity gate details (ADR-0014), `gaitlab bench --trt [--synthetic]`, pure tests (`test_bench.py`, `test_cli.py`). Left: run the gpu test on the GPU host, then B2 on real test prompts with a real adapter
 - [ ] Nsight Systems trace screenshot in `results/bench/`
 - [ ] `app/coach.py` Gradio demo
 - [ ] `gaitlab report` fills README results; `check_readme_numbers.py` clean

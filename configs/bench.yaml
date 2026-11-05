@@ -2,7 +2,7 @@
 warmup_iters: 20
 measure_iters: 200
 batch_sizes: [1, 16]
-precision: fp16
+precision: fp16                    # fp16 | bf16 (Gemma 3 can overflow in fp16; parity then fails)
 clip: data/raw/BENCH/natural.mp4   # fixed 60-s clip; set per machine
 stages: [decode, pose, clean_events_features, scoring_pass, generate]
 trt:

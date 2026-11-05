@@ -61,5 +61,5 @@ uv run gaitlab synth --n-sessions 6                              # synthetic dat
 - Phone video can have variable frame rate. Use container PTS (`t` array), not `frame / fps`, for timing.
 - Gemma grade tokens: assert `" 1"…" 5"` are single tokens for the loaded tokenizer before trusting logit grading. Gemma 3 splits them (`" "` + `"1"`), so `llm/grade.py` scores the bare digits after `"grade: "` (ADR-0013).
 - torch and LightGBM segfault when loaded into one process on macOS (separate OpenMP runtimes). Keep `baselines` and `train`/`predict` in separate processes; tests chaining them use subprocesses.
-- Model weights live in `.hf_cache/` inside the repo (rule 8); `llm.runtime` passes that `cache_dir`. Don't download into `~/.cache/huggingface`.
+- Model weights live in `.hf_cache/` inside the repo (rule 8); `llm.runtime` passes that `cache_dir`. Don't download into `~/.cache/huggingface`. On DeltaAI, `scripts/cluster/env.sh` sets `HF_HOME` under `GAITLAB_STORE` instead. The user runs every cluster command; Claude only edits `scripts/cluster/` and `docs/CLUSTER.md` here.
 - Torch-TensorRT: compile only the fixed-shape scoring wrapper (ADR-0004), not `generate()`.
