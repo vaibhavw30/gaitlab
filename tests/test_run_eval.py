@@ -114,3 +114,102 @@ def test_run_requires_every_model_to_cover_the_same_test_windows(inputs):
     with pytest.raises(ValueError, match="lgbm"):
         run(str(preds), str(labels), str(split), synthetic=True, tag_vocab=VOCAB, n_boot=10,
             results_root=str(root / "results"))  # fmt: skip
+
+
+# --- LLM predictions: verifier (G4) and consistency (G6) -------------------------------------
+
+CFG_TAGS = ["overstride", "low_cadence"]
+
+
+def _llm_inputs(root: Path, preds: Path, truth: dict, cfg) -> dict[str, dict]:
+    """An LLM prediction file whose cues alternate grounded / ungrounded, plus its windows."""
+    over = cfg.tags["overstride"].threshold
+    windows, rows = {}, []
+    test = [w for w in truth if SPLIT[w.split(":")[0]] == "test"]
+    for k, wid in enumerate(test):
+        windows[wid] = {"window_id": wid, "overstride_L_med": over + 0.1, "cadence_spm_med": 170.0}
+        cue = "Land closer under your hips." if k % 2 == 0 else "Great job."
+        row = {"window_id": wid, "pred_grade": truth[wid][0], "tags": "overstride", "cue": cue,
+               "synthetic": True}  # fmt: skip
+        for g in range(1, 6):
+            row[f"p{g}"] = 0.6 if g == truth[wid][0] else 0.1
+        rows.append(row)
+    with open(preds / "gemma3_270m_lora.csv", "w", newline="") as f:
+        wr = csv.DictWriter(f, PRED_COLUMNS)
+        wr.writeheader()
+        wr.writerows(rows)
+    (preds / "gemma3_270m_lora.meta.json").write_text(
+        json.dumps({"kind": "llm", "generates_cues": True, "grade_token_form": "bare_digit"})
+    )
+    runs = {
+        wid: {
+            "grades": [truth[wid][0]] * 3 if k % 3 else [truth[wid][0], 1, truth[wid][0]],
+            "tags": [["overstride"]] * 3,
+            "cues": ["Land closer."] * 3 if k % 2 == 0 else ["a", "b", "a"],
+        }
+        for k, wid in enumerate(test)
+    }
+    (preds / "gemma3_270m_lora.consistency.json").write_text(
+        json.dumps({"runs": 3, "temperature": 0.7, "windows": runs})
+    )
+    return windows
+
+
+def test_llm_joins_the_ladder_with_verifier_and_consistency(inputs, synthetic_features_cfg):
+    root, preds, labels, split = inputs
+    truth = {w: (g, t) for w, (g, t) in _labels(root / "labels2.csv").items()}
+    windows = _llm_inputs(root, preds, truth, synthetic_features_cfg)
+    out = run(
+        str(preds), str(labels), str(split), synthetic=True, tag_vocab=VOCAB, n_boot=50,
+        results_root=str(root / "results"), windows=windows, features_cfg=synthetic_features_cfg,
+    )  # fmt: skip
+    assert set(out) == {"ladder", "tags", "calibration", "verifier", "consistency"}
+    for name in ("verifier", "consistency"):
+        assert out[name] == root / "results" / "synthetic" / "grader" / f"{name}.json"
+        assert json.loads(out[name].read_text())["synthetic"] is True
+    ladder = json.loads(out["ladder"].read_text())["metrics"]
+    assert ladder["order"][-1] == "gemma3_270m_lora"
+    assert ladder["models"]["gemma3_270m_lora"]["selection"]["grade_token_form"] == "bare_digit"
+    cal = json.loads(out["calibration"].read_text())["metrics"]
+    assert "gemma3_270m_lora" in cal["models"]
+
+    ver = json.loads(out["verifier"].read_text())["metrics"]
+    assert set(ver["models"]) == {"gemma3_270m_lora"}
+    assert ver["no_cues"] == ["rules", "logreg", "lgbm"]
+    v = ver["models"]["gemma3_270m_lora"]
+    n_test = len(windows)
+    assert v["n_windows"] == n_test and v["n_passed"] == (n_test + 1) // 2
+    assert v["failures"] == {"cue_misses_tags": n_test // 2}
+    assert 0.0 <= v["pass_rate"]["low"] <= v["pass_rate"]["point"] <= v["pass_rate"]["high"]
+
+    con = json.loads(out["consistency"].read_text())["metrics"]
+    c = con["models"]["gemma3_270m_lora"]
+    assert c["runs"] == 3 and c["temperature"] == 0.7
+    n_unstable = sum(1 for k in range(n_test) if k % 3 == 0)
+    assert c["grade_identical"]["point"] == pytest.approx(1 - n_unstable / n_test)
+    assert c["tags_identical_sampled"]["point"] == 1.0
+    assert c["cue_identical_sampled"]["point"] == pytest.approx(((n_test + 1) // 2) / n_test)
+    assert load_reportable(root / "results") == []
+
+
+def test_llm_predictions_need_windows_for_the_verifier(inputs, synthetic_features_cfg):
+    root, preds, labels, split = inputs
+    truth = _labels(root / "labels2.csv")
+    _llm_inputs(root, preds, truth, synthetic_features_cfg)
+    with pytest.raises(ValueError, match="windows"):
+        run(str(preds), str(labels), str(split), synthetic=True, tag_vocab=VOCAB, n_boot=10,
+            results_root=str(root / "results"))  # fmt: skip
+
+
+def test_consistency_file_must_cover_the_test_windows(inputs, synthetic_features_cfg):
+    root, preds, labels, split = inputs
+    truth = _labels(root / "labels2.csv")
+    windows = _llm_inputs(root, preds, truth, synthetic_features_cfg)
+    p = preds / "gemma3_270m_lora.consistency.json"
+    d = json.loads(p.read_text())
+    d["windows"].pop(next(iter(d["windows"])))
+    p.write_text(json.dumps(d))
+    with pytest.raises(ValueError, match="consistency"):
+        run(str(preds), str(labels), str(split), synthetic=True, tag_vocab=VOCAB, n_boot=10,
+            results_root=str(root / "results"), windows=windows,
+            features_cfg=synthetic_features_cfg)  # fmt: skip

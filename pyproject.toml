@@ -54,6 +54,7 @@ markers = [
     "gpu: needs an NVIDIA GPU (skipped in CI)",
     "data: needs downloaded public or own data (skipped in CI)",
     "slow: slow test",
+    "own_process: run in a fresh interpreter (loads torch; tests/conftest.py, ADR-0013)",
 ]
 
 [tool.ruff]

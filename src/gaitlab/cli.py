@@ -316,16 +316,113 @@ def build_sft(
     typer.echo(f"SFT records: {counts} → {out} (synthetic)")
 
 
-@app.command()
-def train(model: str = typer.Option("1b"), allow_synthetic: bool = False) -> None:
-    """LoRA fine-tune (TASKS M3)."""
-    _todo("train (llm.train_lora)")
+LORA_CFG = typer.Option("configs/train_lora.yaml", "--lora-config", help="LoRA / grader config")
+DEVICE = typer.Option(None, "--device", help="cuda | mps | cpu (default: cuda > mps > cpu)")
 
 
 @app.command()
-def predict(model: str = typer.Option("1b")) -> None:
-    """Grade + tags + cue on the test split (TASKS M3)."""
-    _todo("predict (llm.grade)")
+def train(
+    model: str = typer.Option("1b", help="1b | 270m"),
+    sft_dir: str = typer.Option("data/sft", "--sft-dir"),
+    allow_synthetic: bool = typer.Option(
+        False, "--allow-synthetic", help="dry run on synthetic SFT records"
+    ),
+    max_steps: int | None = typer.Option(None, help="cap optimizer steps (smoke runs)"),
+    out_root: str = typer.Option("runs", "--out-root"),
+    device: str | None = DEVICE,
+    lora_config: str = LORA_CFG,
+) -> None:
+    """LoRA fine-tune Gemma 3 on SFT JSONL → runs/<run_id>/ (TECHNICAL_PLAN §7.2)."""
+    from gaitlab.llm.train_lora import check_synthetic, read_sft
+    from gaitlab.llm.train_lora import train as train_lora
+
+    try:
+        check_synthetic(read_sft(sft_dir), allow_synthetic)
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED)
+        raise typer.Exit(code=2) from e
+    run = train_lora(
+        model, sft_dir=sft_dir, cfg_path=lora_config, out_root=out_root,
+        allow_synthetic=allow_synthetic, max_steps=max_steps, device=device,
+    )  # fmt: skip
+    meta = json.loads((run / "run.json").read_text())
+    flag = " (synthetic)" if meta["synthetic"] else ""
+    typer.echo(f"{meta['model_id']} on {meta['device']}, {meta['global_step']} steps → {run}{flag}")
+
+
+@app.command()
+def predict(
+    model: str = typer.Option("1b", help="1b | 270m"),
+    synthetic: bool = SYNTHETIC_ONLY,
+    root: str = SYN_ROOT,
+    adapter: str | None = typer.Option(
+        None, help="run dir (runs/<run_id>); default: newest run of --model"
+    ),
+    zero_shot: bool = typer.Option(False, "--zero-shot", help="no adapter"),
+    runs_root: str = typer.Option("runs", "--runs", help="where gaitlab train writes runs"),
+    consistency_runs: int | None = typer.Option(
+        None, help="G6 repeats (default: config consistency.runs; 0 skips)"
+    ),
+    batch_size: int = typer.Option(8, help="prompts per forward / generate batch"),
+    device: str | None = DEVICE,
+    lora_config: str = LORA_CFG,
+    config: str = CFG,
+    features: str = FCFG,
+) -> None:
+    """Gemma grade (logits) + greedy tags/cue for the test windows → predictions/<model>.csv."""
+    import pandas as pd
+
+    from gaitlab.config import config_hash, load_train_lora_config
+    from gaitlab.data.synthetic import load_synthetic_grader_inputs
+    from gaitlab.eval.run_eval import PRED_COLUMNS
+    from gaitlab.llm.grade import llm_model_name, load_grader, predict_windows
+    from gaitlab.llm.train_lora import latest_run
+
+    _require_synthetic(synthetic, "predict")
+    lcfg = load_train_lora_config(lora_config)
+    cfg = load_pipeline_config(config)
+    fcfg = load_features_config(features)
+    if model not in lcfg.models:
+        raise typer.BadParameter(f"--model must be one of {sorted(lcfg.models)}")
+    run_meta: dict = {}
+    adapter_path = None
+    if not zero_shot:
+        run_dir = Path(adapter) if adapter else latest_run(runs_root, model, synthetic=True)
+        run_meta = json.loads((run_dir / "run.json").read_text())
+        if run_meta["model_key"] != model:
+            raise typer.BadParameter(f"{run_dir} was trained for {run_meta['model_key']}")
+        adapter_path = str(run_dir / "adapter")
+    windows, labels, split = load_synthetic_grader_inputs(root)
+    test = sorted(
+        (w for w in windows if str(w["window_id"]) in labels
+         and split.get(str(w["session_id"])) == "test"),
+        key=lambda w: str(w["window_id"]),
+    )  # fmt: skip
+    grader = load_grader(lcfg.models[model], adapter_path, cfg=lcfg, device=device)
+    n_rep = lcfg.consistency.runs if consistency_runs is None else consistency_runs
+    rows, reps = predict_windows(
+        grader, test, fcfg.feature_order, synthetic=True, consistency_runs=n_rep,
+        temperature=lcfg.consistency.temperature, seed=cfg.seed, batch_size=batch_size,
+    )  # fmt: skip
+    name = llm_model_name(model, zero_shot)
+    out = Path(root) / "predictions"
+    out.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows, columns=PRED_COLUMNS).to_csv(out / f"{name}.csv", index=False)
+    meta = {
+        "kind": "llm", "generates_cues": True, "model_key": model, "zero_shot": zero_shot,
+        "run_id": run_meta.get("run_id"), "train_config_hash": run_meta.get("config_hash"),
+        "lora_config_hash": config_hash(lcfg), **grader.meta(), "synthetic": True,
+    }  # fmt: skip
+    (out / f"{name}.meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    cons = out / f"{name}.consistency.json"
+    if reps is not None:
+        cons.write_text(json.dumps(reps) + "\n")
+    else:
+        cons.unlink(missing_ok=True)
+    typer.echo(
+        f"{name}: {len(rows)} test windows, grade tokens {grader.tokens.form!r}, "
+        f"device {grader.device} → {out / f'{name}.csv'} (synthetic)"
+    )
 
 
 @app.command("eval")
@@ -339,19 +436,22 @@ def eval_(
 ) -> None:
     """Grader metrics for every model's test predictions → results/[synthetic/]grader."""
     from gaitlab.config import config_hash
-    from gaitlab.data.synthetic import load_synthetic_grader_inputs
+    from gaitlab.data.synthetic import load_synthetic_grader_inputs, synthetic_features_config
     from gaitlab.eval.run_eval import run
 
     _require_synthetic(synthetic, "eval")
     cfg = load_pipeline_config(config)
     fcfg = load_features_config(features)
-    load_synthetic_grader_inputs(root)  # writes <root>/splits.json if it isn't there yet
+    # Also writes <root>/splits.json if it isn't there yet.
+    windows, _, _ = load_synthetic_grader_inputs(root)
+    vcfg = synthetic_features_config(fcfg)  # the verifier's thresholds on synthetic data
     r = Path(root)
     paths = run(
         str(r / "predictions"), str(r / "labels.csv"), str(r / "splits.json"), synthetic=True,
         tag_vocab=list(fcfg.tags), n_boot=n_boot or cfg.bootstrap.n, seed=cfg.seed,
         config={"pipeline": config_hash(cfg), "features": config_hash(fcfg)},
-        results_root=results,
+        results_root=results, windows={str(w["window_id"]): w for w in windows},
+        features_cfg=vcfg,
     )  # fmt: skip
     for p in paths.values():
         typer.echo(f"→ {p}")

@@ -31,3 +31,7 @@ generate:
 
 logging:
   wandb_project: gaitlab     # optional; runs/<run_id>/ is always written
+
+consistency:                 # G6 (EVALUATION.md): repeat grade scoring; sample tags + cue at T
+  runs: 5
+  temperature: 0.7

@@ -48,3 +48,16 @@ def test_no_tags_with_issue_cue_fails(synthetic_features_cfg):
 def test_rules_grade(synthetic_features_cfg):
     grade, tags = rules_predict(OVERSTRIDING, synthetic_features_cfg)
     assert tags == ["overstride"] and grade == 4
+
+
+def test_failure_reasons_have_stable_codes(synthetic_features_cfg):
+    cfg = synthetic_features_cfg
+    clean = dict(OVERSTRIDING, overstride_L_med=0.2)
+    assert verify(OVERSTRIDING, ["overstride"], "Land closer.", cfg).codes == []
+    assert verify(OVERSTRIDING, ["pelvic_drop"], "x", cfg).codes == ["unknown_tag"]
+    assert verify(OVERSTRIDING, ["high_bounce"], "Less bounce.", cfg).codes == ["unsupported_tag"]
+    assert verify(OVERSTRIDING, ["overstride"], "Great job.", cfg).codes == ["cue_misses_tags"]
+    assert verify(clean, [], "Raise your cadence.", cfg).codes == ["cue_implies_untagged"]
+    r = verify(OVERSTRIDING, ["high_bounce", "pelvic_drop"], "Nice.", cfg)
+    assert r.codes == ["unknown_tag", "unsupported_tag", "cue_misses_tags"]
+    assert len(r.reasons) == len(r.codes)

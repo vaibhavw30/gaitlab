@@ -17,4 +17,4 @@ Baselines, SFT export and grader evaluation should run end to end before real la
 ## Consequences
 - With rule labels, the rules baseline reproduces its own labels on the synthetic test split. That checks the plumbing and says nothing about grading quality.
 - Two test sessions make the session-bootstrap CIs coarse; that is a property of the dry run, not of the metric code.
-- CI installs `ml` but not `viz`, so the two chart-rendering tests are skipped there (the pure helpers still run). Add `--extra viz` to CI if chart rendering should be gated too.
+- CI installs `ml` and `viz`, so the chart-rendering tests run there too (CI gained `--extra viz` after this ADR).

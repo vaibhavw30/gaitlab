@@ -195,3 +195,65 @@ def test_baselines_and_eval_synthetic_write_only_synthetic_results(grader_dir: P
 def test_baselines_without_synthetic_is_not_available_yet():
     res = runner.invoke(app, ["baselines"])
     assert res.exit_code != 0
+
+
+def test_predict_without_synthetic_is_not_available_yet():
+    res = runner.invoke(app, ["predict", "--model", "270m"])
+    assert res.exit_code == 2
+
+
+def test_train_refuses_synthetic_sft_without_allow_synthetic(grader_dir: Path):
+    sft = grader_dir / "synthetic" / "sft"
+    res = runner.invoke(app, ["train", "--model", "270m", "--sft-dir", str(sft)])
+    assert res.exit_code != 0
+    assert "allow-synthetic" in res.output or "allow_synthetic" in str(res.exception)
+
+
+_LLM_READY = all(importlib.util.find_spec(m) for m in ("torch", "transformers", "peft", "trl"))
+
+
+def _invoke_subprocess(*args: str) -> None:
+    """Run a CLI command in its own process. torch and LightGBM bundle different OpenMP
+    runtimes and segfault when loaded into one process on macOS; the grader_dir fixture has
+    already loaded LightGBM here, and real use runs each command separately anyway."""
+    import subprocess
+    import sys
+
+    res = subprocess.run(
+        [sys.executable, "-m", "gaitlab.cli", *args], capture_output=True, text=True
+    )
+    assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-4000:]
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not _LLM_READY, reason="needs the 'llm' extra")
+def test_two_step_cpu_chain_train_predict_eval(grader_dir: Path, tmp_path: Path):
+    """The Mac smoke run in miniature: LoRA 2 steps on CPU → predict → eval with the LLM."""
+    import shutil
+
+    from gaitlab.llm.runtime import is_cached
+
+    if not is_cached("google/gemma-3-270m-it"):
+        pytest.skip("needs gemma-3-270m-it in .hf_cache/")
+    data, results, runs = tmp_path / "synthetic", tmp_path / "results", tmp_path / "runs"
+    shutil.copytree(grader_dir / "synthetic", data)
+    _invoke_subprocess("train", "--model", "270m", "--sft-dir", str(data / "sft"),
+                       "--allow-synthetic", "--max-steps", "2", "--device", "cpu",
+                       "--out-root", str(runs))  # fmt: skip
+    (run,) = runs.iterdir()
+    common = ("--synthetic", "--root", str(data), "--config", CFG, "--features", FCFG)
+    _invoke_subprocess("predict", "--model", "270m", "--runs", str(runs), "--device", "cpu",
+                       "--consistency-runs", "2", *common)  # fmt: skip
+    preds = data / "predictions"
+    meta = json.loads((preds / "gemma3_270m_lora.meta.json").read_text())
+    assert meta["run_id"] == run.name and meta["synthetic"] is True
+    df = pd.read_csv(preds / "gemma3_270m_lora.csv")
+    assert set(df["synthetic"]) == {True}
+    assert (df[[f"p{k}" for k in range(1, 6)]].sum(axis=1) - 1).abs().max() < 1e-4
+    _invoke("eval", *common, "--results", str(results), "--n-boot", "20")
+    out = results / "synthetic" / "grader"
+    assert {p.stem for p in out.glob("*.json")} == {
+        "ladder", "tags", "calibration", "verifier", "consistency"
+    }  # fmt: skip
+    ladder = json.loads((out / "ladder.json").read_text())["metrics"]
+    assert "gemma3_270m_lora" in ladder["order"]

@@ -38,7 +38,7 @@ bash scripts/download_models.sh        # MediaPipe pose_landmarker_heavy.task
 uv run pytest -m "not gpu and not data"
 ```
 
-Gemma weights need the Gemma license accepted on Hugging Face (`huggingface-cli login`).
+Gemma weights need the Gemma license accepted on Hugging Face and `HF_TOKEN` set for the first download. They are cached in the repo under `.hf_cache/` (git-ignored) unless `HF_HOME` is set. The `llm` extra also runs on a Mac (MPS or CPU, float32) for synthetic dry runs.
 
 ## Usage
 
@@ -57,6 +57,9 @@ No video yet? Dry-run the chain on synthetic keypoints (all outputs flagged synt
 gaitlab synth --n-sessions 6 --write-keypoints
 gaitlab process --session 20260101-01 --sessions data/synthetic/sessions.csv --backend synthetic
 gaitlab overlay --clip data/synthetic/interim/20260101-01/natural.synthetic.npz --gif
+gaitlab baselines --synthetic && gaitlab build-sft --synthetic
+gaitlab train --model 270m --sft-dir data/synthetic/sft --allow-synthetic --max-steps 20
+gaitlab predict --synthetic --model 270m && gaitlab eval --synthetic
 ```
 
 ## Data

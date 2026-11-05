@@ -29,3 +29,6 @@ build/
 .idea/
 .vscode/
 /results/synthetic/
+
+# Hugging Face cache (HF_HOME) kept inside the repo, CLAUDE.md rule 8
+.hf_cache/

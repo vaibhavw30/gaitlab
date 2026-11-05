@@ -65,11 +65,11 @@ Goal: the whole pipeline runs on other people's running and on synthetic data, s
 ## M3 — Grader
 
 - [ ] Decide GPU host for M3–M4 (own NVIDIA machine / cloud GPU / lab cluster with PI approval)
-- [ ] `llm/grade.py`: chat-template rendering, single-token assertion for " 1"…" 5", logit scoring, greedy tags + cue
-- [ ] `llm/train_lora.py` (TRL SFTTrainer, assistant-only loss) for `gemma-3-1b-it` and `gemma-3-270m-it` (`@pytest.mark.gpu` smoke test with 4 steps)
+- [x] `llm/grade.py`: chat-template rendering, single-token assertion for " 1"…" 5" (Gemma 3 falls back to bare digits, ADR-0013), logit scoring, greedy tags + cue, device cuda > mps > cpu (`test_grade.py`; CUDA test written, not yet run)
+- [~] `llm/train_lora.py` (TRL SFTTrainer, assistant-only loss) for `gemma-3-1b-it` and `gemma-3-270m-it` (`@pytest.mark.gpu` smoke test with 4 steps). Done: 270m on CPU/MPS (`slow` 2-step test, assistant-mask test, 20-step synthetic smoke run on a Mac). Left: the GPU smoke test on the M3 host, and 1b
 - [ ] Zero-shot 1B predictions
 - [ ] Blind re-grade of 40 windows (user task) → `results/grader/intra_rater.json` (G2)
-- [ ] `eval/run_eval.py` → G1, G3–G6 result files. Done: G1 `ladder`, G3 `tags`, G5 `calibration` (`test_run_eval.py`). Left: G4 verifier, G6 consistency (need LLM predictions)
+- [ ] `eval/run_eval.py` → G1, G3–G6 result files. Done: G1 `ladder`, G3 `tags`, G4 `verifier`, G5 `calibration`, G6 `consistency` (`test_run_eval.py`; synthetic dry run with `gaitlab predict`). Left: real-data result files (need M2 labels and a GPU-trained adapter)
 - [ ] `viz/plots.py`: ladder chart, knee-angle-by-condition, confusion matrix, reliability diagram. Done: ladder, knee-by-condition (`test_plots.py`). Left: confusion, reliability
 
 ## M4 — Speed and polish

@@ -19,3 +19,14 @@ def test_config_hash_is_stable_and_sensitive():
     assert config_hash(a) == config_hash(b)
     b.windows.strides = 21
     assert config_hash(a) != config_hash(b)
+
+
+def test_train_lora_yaml_loads_into_the_typed_model():
+    from gaitlab.config import load_train_lora_config
+
+    c = load_train_lora_config("configs/train_lora.yaml")
+    assert set(c.models) == {"1b", "270m"}
+    assert c.models["270m"] == "google/gemma-3-270m-it"
+    assert c.grade.grade_tokens == [" 1", " 2", " 3", " 4", " 5"]
+    assert c.train.assistant_only_loss is True
+    assert c.consistency.runs == 5 and c.consistency.temperature == 0.7

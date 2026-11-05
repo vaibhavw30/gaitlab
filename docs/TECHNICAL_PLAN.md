@@ -206,11 +206,15 @@ cue: <one sentence>
 ```
 Messages go through the model's chat template (user = prompt, assistant = target).
 
-**Grade by logits** ([ADR-0002](adr/0002-grade-from-logits.md)): render the chat with the assistant turn prefilled with `"grade:"`. Run one forward pass and take next-token logits at the last position, restricted to the token ids of `" 1"…" 5"`. Assert each is a single token for the tokenizer (unit test). Softmax → `P(grade)`. Report argmax and expected grade. Tags and cue come from a separate greedy `generate` continuing after the grade.
+**Grade by logits** ([ADR-0002](adr/0002-grade-from-logits.md), [ADR-0013](adr/0013-llm-grader-on-cpu-mps-and-gemma3-grade-tokens.md)): render the chat with the assistant turn prefilled with `"grade:"`. Run one forward pass and take next-token logits at the last position, restricted to the token ids of `" 1"…" 5"`. Assert each is a single token for the tokenizer (unit test); if not, score the bare digits `"1"…"5"` after `"grade: "` instead (Gemma 3 does this, since it splits `" 3"` into `" "` + `"3"`). Either way, assert that the digit follows the prefix as one token inside the real chat template. Both checks run before the weights load. Softmax → `P(grade)`. Report argmax and expected grade. Tags and cue come from a separate greedy `generate` continuing after the grade.
+
+**Device** (`llm/runtime.py`): `cuda` > `mps` > `cpu` (`--device` overrides). CUDA loads bf16; MPS and CPU load float32 with eager attention, and training always uses eager attention. Model files go in the repo-local Hugging Face cache `.hf_cache/` unless `HF_HOME` is set. torch and LightGBM never share a process (they segfault together on macOS; ADR-0013).
 
 **Fixed shape for TensorRT:** prompts are padded (left) to `cfg.max_prompt_tokens` so the scoring pass has a static shape ([ADR-0004](adr/0004-tensorrt-placement.md)).
 
-**LoRA** (`train_lora.py`, `configs/train_lora.yaml`): PEFT LoRA r=16, α=32, dropout 0.05, targets `q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj`; TRL `SFTTrainer`, loss on assistant tokens only; lr 2e-4 cosine, warmup 5%, 3 epochs, bf16, effective batch 16, seed 0. Same recipe for `gemma-3-1b-it` and `gemma-3-270m-it`. Log to W&B (optional) and always to `runs/<run_id>/`.
+**LoRA** (`train_lora.py`, `configs/train_lora.yaml`, typed by `config.TrainLoraConfig`): PEFT LoRA r=16, α=32, dropout 0.05, targets `q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj`; TRL `SFTTrainer` with `assistant_only_loss` (TRL swaps in its Gemma 3 training template, which marks the assistant turn including `<end_of_turn>`); lr 2e-4 cosine, warmup 5%, 3 epochs, bf16 on CUDA (float32 elsewhere), effective batch 16, seed 0, eval on dev each epoch, best checkpoint by dev loss. `--max-steps` caps steps for smoke runs. Same recipe for `gemma-3-1b-it` and `gemma-3-270m-it`. `runs/<run_id>/` (`<model_key>-<UTC time>-<config hash>`) holds `adapter/`, `config.json`, `run.json` (config and data hashes, device, dtype, versions, `synthetic`), `trainer_state.json` with timing entries removed, and a `SYNTHETIC` marker for dry runs. Synthetic SFT records need `--allow-synthetic`; a mix of synthetic and real records is always refused. W&B logging is optional and CUDA-only.
+
+**Predict** (`gaitlab predict`): for each labeled test window, logit grade + `p1..p5`, then greedy tags and cue, written as `predictions/gemma3_<key>_{lora,zeroshot}.csv` (§7.1 schema) with `meta.json` (`generates_cues`, grade-token form, run id, device). G6 repeats (`consistency.runs` scoring passes; tags and cue sampled at `consistency.temperature`, no top-k/top-p) go to `<model>.consistency.json`.
 
 ### 7.3 Cue verifier (`llm/verifier.py`)
 
@@ -220,7 +224,7 @@ Input: window features, generated tags, cue, `features.yaml`. Pass iff (a) every
 
 Metric definitions, splits and protocol live in [EVALUATION.md](EVALUATION.md). Implementation:
 - `eval/metrics.py`: exact agreement, within-1, quadratic-weighted kappa, bootstrap CI (resample **sessions**, not windows), macro-F1 for multi-label tags, ECE (10 bins) and Brier on grade probabilities, ICC(2,1), Bland–Altman bias and limits, MAE.
-- `eval/run_eval.py`: loads predictions from each model, computes everything, writes `results/grader/*.json`.
+- `eval/run_eval.py`: loads predictions from each model, computes everything, writes `results/grader/*.json`: `ladder`, `tags`, `calibration` for every model; `verifier` (G4: pass rate with session-bootstrap CI and a histogram of failure codes `unknown_tag | unsupported_tag | cue_misses_tags | cue_implies_untagged`) for models whose `meta.json` says `generates_cues`; `consistency` (G6: share of windows with identical grade over the scoring repeats, and identical tags / cue over the sampled repeats) for models with a `<model>.consistency.json`.
 - `bench/latency.py`: CUDA-event timing with warmup and iterations from `bench.yaml`; reports p50/p95/mean per stage (decode, pose, clean+events+features, scoring pass, generate) and end-to-end fps on a fixed clip; peak VRAM via `torch.cuda.max_memory_allocated`.
 - `bench/trt.py`: Torch-TensorRT `compile(ir="dynamo")` on a wrapper module returning the 5 grade logits for a padded batch. Compare against eager FP16 at batch 1 and 16. **Parity gate:** argmax grade identical on 100% of test prompts and max |ΔP| reported. If parity fails, the speedup is not reported.
 
@@ -255,9 +259,9 @@ Metric definitions, splits and protocol live in [EVALUATION.md](EVALUATION.md). 
 | `label [--blind N]` | launch labeling app |
 | `baselines [--synthetic]` | fit and predict rules / LR / LightGBM. `--synthetic`: on `data/synthetic`, predictions to `data/synthetic/predictions/` |
 | `build-sft [--synthetic]` | labels + windows → SFT JSONL (session split). `--synthetic`: `data/synthetic/sft/*.jsonl` |
-| `train --config configs/train_lora.yaml --model {1b,270m}` | LoRA fine-tune |
-| `predict --model ...` | grade + tags + cue for the test split |
-| `eval [--synthetic]` | all metrics → results/grader (`--synthetic`: results/synthetic/grader, never reported) |
+| `train --model {1b,270m} [--sft-dir DIR] [--allow-synthetic] [--max-steps N] [--device D]` | LoRA fine-tune → `runs/<run_id>/` |
+| `predict --model {1b,270m} [--synthetic] [--adapter RUN \| --zero-shot] [--consistency-runs R]` | logit grade + greedy tags + cue for the test windows (newest run of `--model` by default) → `predictions/<model>.csv`, `.meta.json`, `.consistency.json`. `--synthetic` only until real labels exist |
+| `eval [--synthetic]` | all metrics → results/grader (`--synthetic`: results/synthetic/grader, never reported); `verifier` and `consistency` when an LLM's predictions are present |
 | `validate {biocv,mocap}` | event and feature validation → results/validation |
 | `bench [--trt]` | latency and TensorRT → results/bench |
 | `report` | regenerate the README results table |
@@ -268,7 +272,7 @@ Metric definitions, splits and protocol live in [EVALUATION.md](EVALUATION.md). 
 
 - `tests/` mirrors `src/`. Synthetic gait (`data/synthetic.py`) is the main fixture: a 2D kinematic runner with **known** cadence, contact frames and per-stride geometry, plus a noise model (Gaussian jitter, dropouts, occasional left/right swaps).
 - Markers: `gpu` (skipped in CI), `slow`, `data` (needs downloaded public data; skipped in CI).
-- CI (`.github/workflows/ci.yml`): `uv sync --extra video --extra ml --extra dev`, `ruff check`, `ruff format --check`, `pytest -m "not gpu and not data"`, plus `scripts/check_readme_numbers.py`.
+- CI (`.github/workflows/ci.yml`): `uv sync --extra video --extra ml --extra viz --extra dev`, `ruff check`, `ruff format --check`, `pytest -m "not gpu and not data"`, plus `scripts/check_readme_numbers.py`.
 - Each milestone's tests are listed in [TASKS.md](TASKS.md). A milestone is done when its tests pass and its result files exist.
 
 ## 12. Evidence base

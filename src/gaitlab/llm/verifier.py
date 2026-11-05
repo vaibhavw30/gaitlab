@@ -36,10 +36,16 @@ def flagged_tags(window_row: Mapping[str, float | None], cfg: FeaturesConfig) ->
     return [t for t in cfg.tags if tag_holds(t, window_row, cfg)]
 
 
+FAILURE_CODES = ("unknown_tag", "unsupported_tag", "cue_misses_tags", "cue_implies_untagged")
+
+
 @dataclass
 class VerifierResult:
+    """``codes[i]`` (one of ``FAILURE_CODES``) classifies ``reasons[i]`` for the G4 histogram."""
+
     passed: bool
     reasons: list[str] = field(default_factory=list)
+    codes: list[str] = field(default_factory=list)
 
 
 def verify(
@@ -52,19 +58,24 @@ def verify(
     of at least one generated tag. A window with no generated tags passes only with an empty
     cue or a cue that names no tag keywords (nothing to correct)."""
     reasons: list[str] = []
+    codes: list[str] = []
     unknown = [t for t in tags if t not in cfg.tags]
     if unknown:
         reasons.append(f"unknown tags: {unknown}")
+        codes.append("unknown_tag")
     known = [t for t in tags if t in cfg.tags]
     unsupported = [t for t in known if not tag_holds(t, window_row, cfg)]
     if unsupported:
         reasons.append(f"tags not supported by features: {unsupported}")
+        codes.append("unsupported_tag")
     cue_l = cue.lower()
     if known:
         if not any(kw.lower() in cue_l for t in known for kw in cfg.tags[t].keywords):
             reasons.append("cue mentions none of the generated tags")
+            codes.append("cue_misses_tags")
     else:
         mentioned = [t for t, r in cfg.tags.items() if any(k.lower() in cue_l for k in r.keywords)]
         if mentioned:
             reasons.append(f"cue implies issues {mentioned} but no tags were generated")
-    return VerifierResult(passed=not reasons, reasons=reasons)
+            codes.append("cue_implies_untagged")
+    return VerifierResult(passed=not reasons, reasons=reasons, codes=codes)

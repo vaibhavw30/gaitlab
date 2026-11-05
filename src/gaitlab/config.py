@@ -82,6 +82,63 @@ class FeaturesConfig(_Strict):
         return [name for name, rule in self.tags.items() if rule.threshold is None]
 
 
+class LoraCfg(_Strict):
+    r: int = 16
+    alpha: int = 32
+    dropout: float = 0.05
+    target_modules: list[str] = Field(
+        default_factory=lambda: [
+            "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"
+        ]
+    )  # fmt: skip
+
+
+class TrainCfg(_Strict):
+    epochs: int = 3
+    lr: float = 2.0e-4
+    scheduler: str = "cosine"
+    warmup_ratio: float = 0.05
+    per_device_batch_size: int = 4
+    grad_accum_steps: int = 4
+    bf16: bool = True  # CUDA only; MPS and CPU train in float32 (llm.runtime)
+    assistant_only_loss: bool = True
+    seed: int = 0
+    max_seq_len: int = 384
+
+
+class GradeCfg(_Strict):
+    max_prompt_tokens: int = 256
+    grade_tokens: list[str] = Field(default_factory=lambda: [" 1", " 2", " 3", " 4", " 5"])
+
+
+class GenerateCfg(_Strict):
+    max_new_tokens: int = 64
+    do_sample: bool = False
+
+
+class ConsistencyCfg(_Strict):
+    """G6: grade scoring repeated ``runs`` times; tags and cue sampled ``runs`` times at T."""
+
+    runs: int = 5
+    temperature: float = 0.7
+
+
+class LoggingCfg(_Strict):
+    wandb_project: str | None = "gaitlab"
+
+
+class TrainLoraConfig(_Strict):
+    models: dict[str, str] = Field(
+        default_factory=lambda: {"1b": "google/gemma-3-1b-it", "270m": "google/gemma-3-270m-it"}
+    )
+    lora: LoraCfg = Field(default_factory=LoraCfg)
+    train: TrainCfg = Field(default_factory=TrainCfg)
+    grade: GradeCfg = Field(default_factory=GradeCfg)
+    generate: GenerateCfg = Field(default_factory=GenerateCfg)
+    consistency: ConsistencyCfg = Field(default_factory=ConsistencyCfg)
+    logging: LoggingCfg = Field(default_factory=LoggingCfg)
+
+
 def load_yaml(path: str | Path) -> dict[str, Any]:
     with open(path) as f:
         return yaml.safe_load(f) or {}
@@ -93,6 +150,10 @@ def load_pipeline_config(path: str | Path = "configs/default.yaml") -> PipelineC
 
 def load_features_config(path: str | Path = "configs/features.yaml") -> FeaturesConfig:
     return FeaturesConfig.model_validate(load_yaml(path))
+
+
+def load_train_lora_config(path: str | Path = "configs/train_lora.yaml") -> TrainLoraConfig:
+    return TrainLoraConfig.model_validate(load_yaml(path))
 
 
 def config_hash(cfg: BaseModel | dict[str, Any]) -> str:

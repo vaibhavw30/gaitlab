@@ -24,7 +24,7 @@ data/
 └── synthetic/                   # gaitlab synth output; SYNTHETIC marker; never reported
     ├── windows.parquet, labels.csv, sessions.json
     ├── splits.json              # session split of the synthetic sessions (reset by synth)
-    ├── predictions/<model>.csv  # gaitlab baselines --synthetic (+ <model>.meta.json)
+    ├── predictions/<model>.csv  # baselines / predict --synthetic (+ .meta.json; LLM: .consistency.json)
     ├── sft/{train,dev,test}.jsonl
     ├── plots/                   # synthetic charts (never under docs/)
     ├── sessions.csv             # with --write-keypoints; path → the npz below
@@ -95,8 +95,11 @@ uv run gaitlab process --session 20260101-01 --sessions data/synthetic/sessions.
 uv run gaitlab process --clip data/synthetic/interim/20260101-01/natural.synthetic.npz
 uv run gaitlab overlay --clip data/synthetic/interim/20260101-01/natural.synthetic.npz --gif
 uv run gaitlab baselines --synthetic && uv run gaitlab build-sft --synthetic && uv run gaitlab eval --synthetic
+# with the llm extra and gemma-3-270m-it in .hf_cache/ (ADR-0013); works on a Mac (MPS or CPU):
+uv run gaitlab train --model 270m --sft-dir data/synthetic/sft --allow-synthetic --max-steps 20
+uv run gaitlab predict --synthetic --model 270m && uv run gaitlab eval --synthetic
 ```
 
-The last line writes `results/synthetic/grader/{ladder,tags,calibration}.json` ([ADR-0012](adr/0012-synthetic-grader-dry-run.md)).
+`eval --synthetic` writes `results/synthetic/grader/{ladder,tags,calibration}.json` ([ADR-0012](adr/0012-synthetic-grader-dry-run.md)), plus `verifier.json` and `consistency.json` once an LLM's predictions are present. The LoRA run goes to `runs/<run_id>/` with a `SYNTHETIC` marker.
 
 Every output carries the flag: npz `backend="synthetic"` and `meta.synthetic`, a `synthetic` column in the CSV and parquet files, `SYNTHETIC` marker files, and a SYNTHETIC watermark on overlay frames.
