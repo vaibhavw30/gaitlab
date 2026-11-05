@@ -49,34 +49,36 @@ def test_budget_counts_rf_jobs_with_gpu_memory_and_interactive_factors(tmp_path:
     ]
     res = _budget(tmp_path, lines)
     assert res.returncode == 0, res.stderr
-    assert "USED 2.50 / 5.0" in res.stdout and "REMAINING 2.50" in res.stdout
+    assert "USED 2.50 / 15.0" in res.stdout and "REMAINING 12.50" in res.stdout
     assert "raw GPU-hours 1.50" in res.stdout
     assert "other" not in res.stdout
 
 
 @needs_bash
-def test_budget_stops_before_a_job_that_could_pass_four_hours(tmp_path: Path):
-    lines = [_job("1", "rf_synth", "ghx4", 3 * 3600 + 1800, "cpu=16,gres/gpu=1,mem=64G")]
+def test_budget_stops_before_a_job_that_could_pass_fourteen_hours(tmp_path: Path):
+    lines = [_job("1", "rf_synth", "ghx4", 13 * 3600 + 1800, "cpu=16,gres/gpu=1,mem=64G")]
     ok = _budget(tmp_path, lines, "--next", "00:20:00", "ghx4")
-    assert ok.returncode == 0 and "tally would be 3.83" in ok.stdout
+    assert ok.returncode == 0 and "tally would be 13.83" in ok.stdout
     stop = _budget(tmp_path, lines, "--next", "00:40:00", "ghx4")
-    assert stop.returncode == 3 and "STOP" in stop.stdout
+    assert stop.returncode == 3 and "ASK" in stop.stdout
     interactive = _budget(tmp_path, lines, "--next", "00:20:00", "ghx4-interactive")
     assert interactive.returncode == 3, "interactive is charged double"
-    past = _budget(tmp_path, [_job("1", "rf_x", "ghx4", 4 * 3600, "gres/gpu=1,cpu=1,mem=1G")])
-    assert past.returncode == 3 and "STOP" in past.stdout
+    past = _budget(tmp_path, [_job("1", "rf_x", "ghx4", 14 * 3600, "gres/gpu=1,cpu=1,mem=1G")])
+    assert past.returncode == 3 and "ASK" in past.stdout
 
 
-def test_job_files_ask_for_one_gpu_nice_and_tight_limits():
+def test_job_files_ask_for_one_gpu_billed_as_one_gh200():
     files = sorted(CLUSTER.glob("rf_*.sbatch"))
     assert {f.stem for f in files} == {"rf_gate", "rf_gputest", "rf_synth"}
-    limits = {"rf_gate": "00:10:00", "rf_gputest": "00:20:00", "rf_synth": "00:20:00"}
+    limits = {"rf_gate": "00:15:00", "rf_gputest": "00:45:00", "rf_synth": "00:45:00"}
     for f in files:
         heads = set(re.findall(r"^#SBATCH (\S+)$", f.read_text(), re.M))
         assert {f"--job-name={f.stem}", "--account=bhhv-dtai-gh", "--partition=ghx4",
                 "--gpus-per-node=1", "--nice=1000", f"--time={limits[f.stem]}",
                 "--output=logs/%x_%j.out"} <= heads, f  # fmt: skip
         assert "source scripts/cluster/env.sh job" in f.read_text()
+        # the most one GPU is billed for: 72 cores and 110 GB per GH200 (docs/CLUSTER.md)
+        assert {"--cpus-per-task=72", "--mem=100g"} <= heads, f
 
 
 @needs_bash
@@ -92,7 +94,8 @@ def test_job_env_is_fully_offline():
         assert var in job
     for var in ("UV_FROZEN=1", "UV_NO_SYNC=1", "WANDB_MODE=disabled"):
         assert f"export {var}" in text
-    assert 'GAITLAB_STORE="${GAITLAB_STORE:-}"' in text, "round-1 value stays a marked variable"
+    store = re.search(r'^GAITLAB_STORE="\$\{GAITLAB_STORE:-(.*)\}"$', text, re.M)
+    assert store and store.group(1).startswith("/work/nvme/"), "store set from round 1"
 
 
 @needs_bash

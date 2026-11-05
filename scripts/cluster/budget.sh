@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# CLUSTER (login node): charged GH200-hours of rf_* jobs since 2026-11-04 against the 5.0 approved.
+# CLUSTER (login node): charged GH200-hours of rf_* jobs since 2026-11-04 against the 15.0 approved.
 #   scripts/cluster/budget.sh                              the tally
 #   scripts/cluster/budget.sh --next 00:20:00 [partition]  plus the next job's worst case
-# Exit 3 (and a STOP line) if the tally is at or past 4.0, or the next job could take it past 4.0.
+# The 15.0 is the budget, not a hard cap. Exit 3 (and an ASK line) if the tally is at or past 14.0,
+# or the next job could take it past 14.0; submit.sh then asks before submitting.
 #
 # Charging (docs/CLUSTER.md "Charging"): each job is billed for the number of GH200s needed for
 # its GPUs, CPU cores (72 per GH200) or memory (110 GB per GH200), whichever is largest, times the
 # partition's charge factor (ghx4 1.0, ghx4-interactive 2.0), times elapsed wall time.
 set -euo pipefail
 START=2026-11-04
-CAP=5.0
-STOP=4.0
+CAP=15.0
+STOP=14.0
 nxt=""
 part=ghx4
 if [[ ${1:-} == --next ]]; then
@@ -43,14 +44,14 @@ $2 ~ /^rf_/ {
 END {
   printf "USED %.2f / %.1f GH200-hours (raw GPU-hours %.2f), REMAINING %.2f\n", used, cap, raw, cap - used
   rc = 0
-  if (used >= stop) { print "STOP: at or past " stop " GH200-hours; ask before starting any job"; rc = 3 }
+  if (used >= stop) { print "ASK: at or past " stop " GH200-hours; confirm before starting any job"; rc = 3 }
   if (nxt != "") {
     n = split(nxt, t, ":")
     secs = (n == 3) ? t[1] * 3600 + t[2] * 60 + t[3] : t[1] * 60 + t[2]
     w = secs / 3600 * factor(npart)
     printf "NEXT worst case %.2f GH200-hours (%s x 1 GPU x factor %.1f on %s); tally would be %.2f\n", \
       w, nxt, factor(npart), npart, used + w
-    if (used + w > stop) { print "STOP: the next job could pass " stop " GH200-hours; ask first"; rc = 3 }
+    if (used + w > stop) { print "ASK: the next job could pass " stop " GH200-hours; confirm first"; rc = 3 }
   }
   exit rc
 }'

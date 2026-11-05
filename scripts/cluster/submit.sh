@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # CLUSTER (login node): budget check, then sbatch one rf_* job (docs/CLUSTER.md steps 4-6).
 #   scripts/cluster/submit.sh rf_gate | rf_gputest | rf_synth
-# Refuses jobs that don't ask for exactly 1 GPU with --nice=1000 and an rf_ name, and anything
-# that could take the tally past 4.0 GH200-hours (budget.sh exit 3).
+# Refuses jobs that don't ask for exactly 1 GPU with --nice=1000 and an rf_ name. If the job could
+# take the tally past 14.0 of the 15.0 GH200-hours (budget.sh exit 3), it asks before submitting.
 set -euo pipefail
 cd "$HOME/gaitlab"
 job="${1:?usage: $0 rf_gate|rf_gputest|rf_synth}"
@@ -14,7 +14,10 @@ done
 [[ $job == rf_* ]] || { echo "refusing: job names start with rf_" >&2; exit 2; }
 limit="$(sed -n 's/^#SBATCH --time=//p' "$file")"
 part="$(sed -n 's/^#SBATCH --partition=//p' "$file")"
-scripts/cluster/budget.sh --next "$limit" "$part" || { echo "NOT SUBMITTED" >&2; exit 3; }
+if ! scripts/cluster/budget.sh --next "$limit" "$part"; then
+  read -r -p "Past 14.0 of 15.0 GH200-hours. Submit $job anyway? [y/N] " ok </dev/tty || ok=""
+  [[ $ok == [yY] ]] || { echo "NOT SUBMITTED" >&2; exit 3; }
+fi
 mkdir -p logs
 sbatch "$file"
 squeue --me

@@ -2,7 +2,7 @@
 
 Project: `~/Downloads/gaitlab` on the laptop, `~/gaitlab` on the cluster. Every command is marked
 **LAPTOP** or **CLUSTER** (login node, or inside a job). The session runs only the committed scripts
-in `scripts/cluster/`. Prof. Chou approved up to **5 GPU-hours** on allocation `bhhv-dtai-gh`, for
+in `scripts/cluster/`. Prof. Chou approved up to **15 GPU-hours** on allocation `bhhv-dtai-gh`, for
 this project only.
 
 **How sure each part is.**
@@ -17,22 +17,22 @@ this project only.
 
 | Topic | What the docs say | Source |
 |---|---|---|
-| Login OS | Login banner in an example: "OS: SLES 15.5 ... CrayOS NVIDIA Grace-Grace aarch64" [docs]. Compute-node OS and **glibc** are not stated [unverified]; SLES 15 SP5 is expected to ship glibc 2.31. | [B/user-guide/vscode/code-server.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/vscode/code-server.html) |
+| Login OS | Login banner in an example: "OS: SLES 15.5 ... CrayOS NVIDIA Grace-Grace aarch64" [docs]. **[checked] round 1 (2026-11-05): the login node runs SLES 15 SP6, aarch64, glibc 2.38.** The compute-node OS and glibc are [unverified] until `rf_gate`. | [B/user-guide/vscode/code-server.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/vscode/code-server.html) |
 | GPU nodes | 4x GH200 per node; "A full node has 4 GPUs, 288 CPU cores, and ~440 GB of available RAM, so 1/4 node = 1 GPU ≈ 72 CPU cores ≈ 110 GB of RAM." Login nodes have no GPUs. | [B/user-guide/running-jobs.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/running-jobs.html), [B/user-guide/architecture.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/architecture.html) |
 | Driver / max CUDA | **Not stated** [unverified]. The only driver figure is old NGC 24.09 output on the containers page ("CUDA Forward Compatibility mode ENABLED ... kernel driver version 535.183.06"). The site PyTorch modules 2.11.0 and 2.12.0 ship CUDA 13.0 wheels and load a site `cuda/13.1.1` module, which suggests a newer driver now. The `cudatoolkit` module is CUDA 12.9. | [B/user-guide/containers.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/containers.html), [B/user-guide/python/pytorch.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/python/pytorch.html), [B/user-guide/prog-env.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/prog-env.html) |
 | Storage | `/u/$USER` (HOME): 100 GB, 750,000 files, 30-day snapshots. `/projects`: 500 GB by default. `/work/nvme` and `/work/hdd`: 1000 GB by default. None of them is purged. "DeltaAI does not provide a /scratch file system." Node `/tmp` is purged after each job. "do not put symbolic links from $HOME to the /projects and /work spaces." `quota` shows usage. | [B/user-guide/data-mgmt.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/data-mgmt.html) |
 | venv location | `/work/nvme` is the "Recommended default" for Python environments. | [B/user-guide/software.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/software.html) |
 | Backups | "You are responsible for backing up your files in /projects and /work." | [B/user-guide/architecture.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/architecture.html) |
-| Containers | "Container support on DeltaAI is provided by Apptainer". Prebuilt NGC images live in `/sw/user/NGC_containers/`, and "The most recent container is pytorch_26.01-py3.sif". `--nv` is used in every example. The Apptainer version and whether pulls are allowed on login nodes are not stated [unverified]. | [B/user-guide/containers.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/containers.html), [B/user-guide/python/pytorch.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/python/pytorch.html) |
-| Internet | Not stated for compute or login nodes [unverified]. We assume compute nodes have none. Round 1 and `rf_gate` check both. | — |
+| Containers | "Container support on DeltaAI is provided by Apptainer". Prebuilt NGC images live in `/sw/user/NGC_containers/`, and "The most recent container is pytorch_26.01-py3.sif". `--nv` is used in every example. **[checked] round 1: `apptainer version 1.4.2-111.1` on the login node; the directory also holds `pytorch_26.07-py3.sif`, newer than the docs mention.** Whether pulls are allowed on login nodes is not stated [unverified]. | [B/user-guide/containers.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/containers.html), [B/user-guide/python/pytorch.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/python/pytorch.html) |
+| Internet | Not stated in the docs. **[checked] round 1: the login node reaches pypi.org, pypi.nvidia.com and huggingface.co (HTTP 200).** Compute nodes are [unverified]; we assume none, jobs run offline, and `rf_gate` reports it. | — |
 | Charging | "The charge unit for DeltaAI is the service unit (SU). This corresponds to the equivalent use of one Grace Hopper GH200 for 1 hour." "Charges are based on the number of GH200 GPUs needed to fullfill the requested memory or CPU cores, whichever is larger." Charge factor: ghx4 1.0, **ghx4-interactive 2.0**. The balance is shown by `accounts`. | [B/user-guide/job-accounting.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/job-accounting.html), [B/user-guide/running-jobs.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/running-jobs.html) |
 | Partitions | ghx4: 48 h max. ghx4-interactive: 2 h max, one job at a time. Default wall time is 30 min. Nodes are shared by default. `--nice` isn't mentioned (it's standard Slurm). | [B/user-guide/running-jobs.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/running-jobs.html) |
 | Login nodes | "Do not run production jobs on the login nodes (very short time debug tests are fine)." Use scp/rsync "for small to modest transfers". | [B/user-guide/citizenship.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/citizenship.html), [B/user-guide/data-mgmt.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/data-mgmt.html) |
 
 **What that means for the budget.**
-- Every job requests 1 GPU, 16 cores and 64 GB, so it's billed as 1 GH200, and charged hours equal GPU-hours on ghx4.
+- Every job requests 1 GPU, 72 cores and 100 GB: the most a 1-GPU job can take and still be billed as 1 GH200 (72 cores and ~110 GB per GH200). Charged hours equal GPU-hours on ghx4, and nothing is held back to save budget.
 - An interactive session is billed double, so we use short `sbatch` jobs only.
-- `scripts/cluster/budget.sh` applies these rules to `sacct` and stops at 4.0 of the 5.0, keeping 1.0 in reserve.
+- `scripts/cluster/budget.sh` applies these rules to `sacct` and warns at 14.0 of the 15.0. The 15.0 is the budget, not a hard cap: past 14.0, `submit.sh` asks before submitting.
 
 ## What the project needs (from its files)
 
@@ -41,14 +41,14 @@ this project only.
 | Python | 3.11 through `uv` (`env.sh` sets `UV_PYTHON=3.11`) | [checked] `requires-python = ">=3.11,<3.13"` |
 | Locked versions | torch 2.14.1, torch-tensorrt 2.14.0, tensorrt-cu13 11.1.0.106, transformers 5.22.1, trl 1.17.1, peft 0.21.2 | [checked] `uv.lock` |
 | torch on Linux | a CUDA 13.0 build: it depends on `cuda-toolkit` 13.0, `nvidia-cudnn-cu13`, `nvidia-nccl-cu13` | [checked] `uv.lock`. So **torch itself** needs a CUDA 13 driver, not only TensorRT. |
-| glibc on aarch64 | `llm` + `dev` wheels need at most `manylinux_2_28`. The TensorRT wheels (`tensorrt-cu13-bindings`, `-libs`) are `manylinux_2_35` only. | [checked] `uv.lock`. On glibc 2.31, `--extra trt` won't install; see "Fallback". |
+| glibc on aarch64 | `llm` + `dev` wheels need at most `manylinux_2_28`. The TensorRT wheels (`tensorrt-cu13-bindings`, `-libs`) are `manylinux_2_35` only. | [checked] `uv.lock`. Below glibc 2.35, `--extra trt` won't install; see "Fallback". The login node has 2.38 [checked]. |
 | Models | `google/gemma-3-1b-it`, `google/gemma-3-270m-it`; gated (accept the Gemma license) | [checked] |
 | Model cache | `$HF_HOME` (set by `env.sh`), otherwise `<repo>/.hf_cache` | [checked] `llm/runtime.py` |
 | Precision | bf16 on CUDA; eager attention for training, SDPA for inference | [checked] |
 
 **Three things that decide whether the uv environment works on DeltaAI:**
 1. **[unverified]** The driver supports CUDA 13 (needed by torch and TensorRT). `rf_gate` checks this.
-2. **[unverified]** glibc ≥ 2.35 for TensorRT. Round 1 checks the login node and `rf_gate` the compute node. If it fails, LoRA work still runs in the uv env and only B2 needs the container.
+2. **[checked on the login node: glibc 2.38; compute node unverified]** glibc ≥ 2.35 for TensorRT. `rf_gate` checks the compute node. If it fails, LoRA work still runs in the uv env and only B2 needs the container.
 3. **[checked]** Use the project's uv environment, not `python/miniforge3_pytorch`. torch-tensorrt 2.14.0 needs torch 2.14.x, and the newest module ships 2.12.0 [docs].
 
 ---
@@ -64,8 +64,8 @@ this project only.
 | `env.sh [job]` | CLUSTER (sourced) | cache, venv and HF paths under `GAITLAB_STORE`; `job` mode adds `UV_OFFLINE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1` |
 | `setup-login.sh uv\|sync\|models` | login node | install uv, build the venv from `uv.lock`, download Gemma |
 | `gate.py` | in `rf_gate` | driver/CUDA 13, torch CUDA build on a GH200, TensorRT imports → `GATE RESULT PASS\|FAIL` |
-| `rf_gate.sbatch` (10 min), `rf_gputest.sbatch` (20 min), `rf_synth.sbatch` (20 min) | jobs | ghx4, 1 GPU, 16 cores, 64 GB, `--nice=1000`, logs to `logs/<name>_<jobid>.out` |
-| `budget.sh [--next HH:MM:SS [partition]]` | login node | charged GH200-hours of `rf_*` jobs since 2026-11-04, used/remaining of 5.0; exit 3 past 4.0 |
+| `rf_gate.sbatch` (15 min), `rf_gputest.sbatch` (45 min), `rf_synth.sbatch` (45 min) | jobs | ghx4, 1 GPU, 72 cores, 100 GB (billed as 1 GH200), `--nice=1000`, logs to `logs/<name>_<jobid>.out` |
+| `budget.sh [--next HH:MM:SS [partition]]` | login node | charged GH200-hours of `rf_*` jobs since 2026-11-04, used/remaining of 15.0; exit 3 (ASK) past 14.0 |
 | `submit.sh rf_…` | login node | checks the job header, runs `budget.sh --next <its limit>`, then `sbatch` |
 | `rsync-down.sh <run_id> [--with-results]` | LAPTOP | pulls `adapter/`, `trainer_state.json`, `run.json`, `config.json`, `SYNTHETIC`, `logs/rf_*.out` and, with the flag, `results/synthetic/**/*.json` |
 
@@ -85,7 +85,7 @@ this project only.
 cd ~/Downloads/gaitlab && scripts/cluster/ssh.sh scripts/cluster/probe.sh
 ```
 
-The output must say `OK: DeltaAI login node`; `WRONG CLUSTER` means stop. Use the `quota` and `ls -ld /work/nvme/bhhv*` output to pick `GAITLAB_STORE`, set it at the top of `scripts/cluster/env.sh`, and commit. Then:
+The output must say `OK: DeltaAI login node`; `WRONG CLUSTER` means stop. Use the `quota` and `ls -ld /work/nvme/bhhv*` output to pick `GAITLAB_STORE`, set it at the top of `scripts/cluster/env.sh`, and commit. (Done 2026-11-05: `/work/nvme/bhhv/vwudaru/gaitlab`, because `$HOME` was mostly full.) Then:
 
 ```bash
 cd ~/Downloads/gaitlab && scripts/cluster/rsync-up.sh --dry-run
@@ -152,7 +152,7 @@ Then `cat logs/rf_synth_<jobid>.out`. Its last line is the run directory `runs/1
 cd ~/gaitlab && scripts/cluster/budget.sh
 ```
 
-`submit.sh` already runs `budget.sh --next <the job's time limit>` and refuses at exit 3. Paste its output every time; the tally in each reply comes from it.
+`submit.sh` already runs `budget.sh --next <the job's time limit>` and asks `[y/N]` at exit 3. Paste its output every time; the tally in each reply comes from it.
 
 ### 7. LAPTOP: bring back the run and the logs
 
@@ -208,11 +208,11 @@ Write `rf_*_ngc.sbatch` variants only if this is needed, and review them before 
 
 | | Value |
 |---|---|
-| Login / compute OS, glibc | TBD |
+| Login / compute OS, glibc | login: SLES 15 SP6, aarch64, glibc 2.38 (round 1); compute: TBD (`rf_gate`) |
 | NVIDIA driver, max CUDA (`nvidia-smi`) | TBD |
 | torch, `torch.version.cuda`, cuDNN | TBD |
 | TensorRT, torch-tensorrt | TBD |
-| `GAITLAB_STORE`, venv, HF_HOME | TBD |
+| `GAITLAB_STORE`, venv, HF_HOME | `/work/nvme/bhhv/vwudaru/gaitlab` (set from round 1); venv `$GAITLAB_STORE/venv`, HF_HOME `$GAITLAB_STORE/hf` |
 | `pytest -m gpu` on a GH200 | TBD |
 | GPU-hours used (total, `budget.sh`) | TBD |
 
@@ -226,6 +226,6 @@ Write `rf_*_ngc.sbatch` variants only if this is needed, and review them before 
 | 401 / 403 downloading Gemma | 401: redo `hf auth login`. 403: accept the Gemma license on huggingface.co, or allow gated repos on the token. |
 | `OFFLINE` / cache error in a job | the model isn't in `$HF_HOME/hub`: redo `setup-login.sh models` |
 | `uv: command not found` in a job | `env.sh` puts `~/.local/bin` on `PATH`; check that `setup-login.sh uv` ran |
-| `NOT SUBMITTED` from `submit.sh` | the budget would pass 4.0 GH200-hours: ask before doing anything else |
+| `NOT SUBMITTED` from `submit.sh` | you answered no at the 14.0 GH200-hour prompt (or a header check failed) |
 | job stays `PD` | normal; `squeue --me --start` gives an estimate, and `--nice` makes the wait longer |
 | no log file | `submit.sh` creates `logs/`; submit from `~/gaitlab` with `submit.sh`, not plain `sbatch` |
