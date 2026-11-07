@@ -74,7 +74,7 @@ def test_job_files_ask_for_one_gpu_billed_as_one_gh200():
     for f in files:
         heads = set(re.findall(r"^#SBATCH (\S+)$", f.read_text(), re.M))
         assert {f"--job-name={f.stem}", "--account=bhhv-dtai-gh", "--partition=ghx4",
-                "--gpus-per-node=1", "--nice=1000", f"--time={limits[f.stem]}",
+                "--gpus-per-node=1", "--nice=0", f"--time={limits[f.stem]}",
                 "--output=logs/%x_%j.out"} <= heads, f  # fmt: skip
         assert "source scripts/cluster/env.sh job" in f.read_text()
         # the most one GPU is billed for: 72 cores and 110 GB per GH200 (docs/CLUSTER.md)
@@ -85,6 +85,20 @@ def test_job_files_ask_for_one_gpu_billed_as_one_gh200():
 @pytest.mark.parametrize("script", sorted(p.name for p in CLUSTER.glob("*.sh")))
 def test_shell_scripts_parse(script: str):
     subprocess.run(["bash", "-n", str(CLUSTER / script)], check=True)
+
+
+def test_scripts_run_directly_are_executable_in_git():
+    """rsync -a copies the mode: a 100644 script fails on the cluster with "Permission denied"."""
+    out = subprocess.run(
+        ["git", "ls-files", "-s", "scripts/cluster"], capture_output=True, text=True, check=True,
+        cwd=ROOT,
+    ).stdout  # fmt: skip
+    modes = {Path(line.split("\t")[1]).name: line.split()[0] for line in out.splitlines()}
+    for name in sorted(p.name for p in CLUSTER.glob("*.sh")):
+        if name == "env.sh":  # sourced, never run
+            continue
+        assert os.access(CLUSTER / name, os.X_OK), f"chmod +x scripts/cluster/{name}"
+        assert modes.get(name, "100755") == "100755", f"git add --chmod=+x scripts/cluster/{name}"
 
 
 def test_job_env_is_fully_offline():

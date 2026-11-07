@@ -26,7 +26,7 @@ this project only.
 | Containers | "Container support on DeltaAI is provided by Apptainer". Prebuilt NGC images live in `/sw/user/NGC_containers/`, and "The most recent container is pytorch_26.01-py3.sif". `--nv` is used in every example. **[checked] round 1: `apptainer version 1.4.2-111.1` on the login node; the directory also holds `pytorch_26.07-py3.sif`, newer than the docs mention.** Whether pulls are allowed on login nodes is not stated [unverified]. | [B/user-guide/containers.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/containers.html), [B/user-guide/python/pytorch.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/python/pytorch.html) |
 | Internet | Not stated in the docs. **[checked] round 1: the login node reaches pypi.org, pypi.nvidia.com and huggingface.co (HTTP 200).** Compute nodes are [unverified]; we assume none, jobs run offline, and `rf_gate` reports it. | — |
 | Charging | "The charge unit for DeltaAI is the service unit (SU). This corresponds to the equivalent use of one Grace Hopper GH200 for 1 hour." "Charges are based on the number of GH200 GPUs needed to fullfill the requested memory or CPU cores, whichever is larger." Charge factor: ghx4 1.0, **ghx4-interactive 2.0**. The balance is shown by `accounts`. | [B/user-guide/job-accounting.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/job-accounting.html), [B/user-guide/running-jobs.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/running-jobs.html) |
-| Partitions | ghx4: 48 h max. ghx4-interactive: 2 h max, one job at a time. Default wall time is 30 min. Nodes are shared by default. `--nice` isn't mentioned (it's standard Slurm). | [B/user-guide/running-jobs.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/running-jobs.html) |
+| Partitions | ghx4: 48 h max. ghx4-interactive: 2 h max, one job at a time. Default wall time is 30 min. Nodes are shared by default. `--nice` isn't mentioned (it's standard Slurm). **[checked] 2026-11-05: `--nice=1000` outweighs the whole priority (age + fairshare + partition), so `sprio` showed priority 1 behind ~2100 pending ghx4 jobs. `scontrol update jobid=<id> nice=0` is allowed for users and restored it; jobs now use `--nice=0`.** | [B/user-guide/running-jobs.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/running-jobs.html) |
 | Login nodes | "Do not run production jobs on the login nodes (very short time debug tests are fine)." Use scp/rsync "for small to modest transfers". | [B/user-guide/citizenship.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/citizenship.html), [B/user-guide/data-mgmt.html](https://docs.ncsa.illinois.edu/systems/deltaai/en/latest/user-guide/data-mgmt.html) |
 
 **What that means for the budget.**
@@ -64,7 +64,7 @@ this project only.
 | `env.sh [job]` | CLUSTER (sourced) | cache, venv and HF paths under `GAITLAB_STORE`; `job` mode adds `UV_OFFLINE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1` |
 | `setup-login.sh uv\|sync\|models` | login node | install uv, build the venv from `uv.lock`, download Gemma |
 | `gate.py` | in `rf_gate` | driver/CUDA 13, torch CUDA build on a GH200, TensorRT imports → `GATE RESULT PASS\|FAIL` |
-| `rf_gate.sbatch` (15 min), `rf_gputest.sbatch` (45 min), `rf_synth.sbatch` (45 min) | jobs | ghx4, 1 GPU, 72 cores, 100 GB (billed as 1 GH200), `--nice=1000`, logs to `logs/<name>_<jobid>.out` |
+| `rf_gate.sbatch` (15 min), `rf_gputest.sbatch` (45 min), `rf_synth.sbatch` (45 min) | jobs | ghx4, 1 GPU, 72 cores, 100 GB (billed as 1 GH200), `--nice=0`, logs to `logs/<name>_<jobid>.out` |
 | `budget.sh [--next HH:MM:SS [partition]]` | login node | charged GH200-hours of `rf_*` jobs since 2026-11-04, used/remaining of 15.0; exit 3 (ASK) past 14.0 |
 | `submit.sh rf_…` | login node | checks the job header, runs `budget.sh --next <its limit>`, then `sbatch` |
 | `rsync-down.sh <run_id> [--with-results]` | LAPTOP | pulls `adapter/`, `trainer_state.json`, `run.json`, `config.json`, `SYNTHETIC`, `logs/rf_*.out` and, with the flag, `results/synthetic/**/*.json` |
@@ -208,12 +208,16 @@ Write `rf_*_ngc.sbatch` variants only if this is needed, and review them before 
 
 | | Value |
 |---|---|
-| Login / compute OS, glibc | login: SLES 15 SP6, aarch64, glibc 2.38 (round 1); compute: TBD (`rf_gate`) |
-| NVIDIA driver, max CUDA (`nvidia-smi`) | TBD |
-| torch, `torch.version.cuda`, cuDNN | TBD |
-| TensorRT, torch-tensorrt | TBD |
-| `GAITLAB_STORE`, venv, HF_HOME | `/work/nvme/bhhv/vwudaru/gaitlab` (set from round 1); venv `$GAITLAB_STORE/venv`, HF_HOME `$GAITLAB_STORE/hf` |
-| `pytest -m gpu` on a GH200 | TBD |
+| Login / compute OS, glibc | SLES 15 SP6, aarch64, glibc 2.38 on both (login: round 1; compute node gh116: `rf_gate` job 3534846, 2026-11-05) |
+| NVIDIA driver, max CUDA (`nvidia-smi`) | driver 595.71.05, CUDA 13.2; GPU `NVIDIA GH200 120GB`, compute capability (9, 0) |
+| torch, `torch.version.cuda`, cuDNN | torch 2.14.1+cu130, CUDA 13.0, cuDNN 9.24 (`92400`); Python 3.11.13 (system `/usr/bin/python3.11`), uv 0.13.7 |
+| TensorRT, torch-tensorrt | 11.1.0.106, 2.14.0 from the uv env (`--extra trt` installs; no container needed). `import torch_tensorrt` needs a GPU (it queries the device at import), so it fails on login nodes by design |
+| `GAITLAB_STORE`, venv, HF_HOME | `/work/nvme/bhhv/vwudaru/gaitlab` (set from round 1); venv `$GAITLAB_STORE/venv`, HF_HOME `$GAITLAB_STORE/hf` (Gemma 1B + 270M) |
+| Python | **uv-managed CPython 3.11** (`UV_PYTHON_PREFERENCE=only-managed`). The system `/usr/bin/python3.11` has no `Python.h`, and Triton compiles `driver.c` against it on first use: `rf_synth` job 3536638 failed with `fatal error: Python.h: No such file or directory` |
+| Compute-node internet | reachable (`rf_gate`: pypi.org:443). Jobs still run with `UV_OFFLINE=1 HF_HUB_OFFLINE=1` so nothing is fetched mid-run |
+| Queue | `--nice=1000` floored priority to 1; `scontrol update jobid=<id> nice=0` (allowed for users) and a shorter `timelimit` on the pending job got it scheduled |
+| 1B LoRA dry run (`rf_synth`) | COMPLETED, job 3539884 (2026-11-06): 20 steps on synthetic SFT, then `predict --synthetic`; run `1b-20261106T161038Z-b9c09dee`. Synthetic, never reported. The earlier job 3536638 failed on `Python.h` and left a partial `runs/1b-20261106T080301Z-b9c09dee` |
+| `pytest -m gpu` on a GH200 | TBD. `test_cuda_time_on_gpu` passed (job 3536639); the TensorRT 270M test did not finish (jobs 3536639 time limit, 3539885 stopped by `timeout` inside `_probs` on the compiled module) |
 | GPU-hours used (total, `budget.sh`) | TBD |
 
 ## Troubleshooting
@@ -221,11 +225,12 @@ Write `rf_*_ngc.sbatch` variants only if this is needed, and review them before 
 | What you see | Fix |
 |---|---|
 | `env.sh: set GAITLAB_STORE ...` | round 1 isn't done: set it at the top of `scripts/cluster/env.sh` on the laptop, commit, re-run `rsync-up.sh` |
+| `fatal error: Python.h: No such file or directory` from `triton/backends/nvidia/driver.c` | the venv was built on the system Python (no headers): `uv python install 3.11`, delete `$GAITLAB_STORE/venv`, `uv sync` again with `UV_PYTHON_PREFERENCE=only-managed` |
 | `SYNC trt: FAILED` mentioning `manylinux_2_35` or "no wheel" | glibc < 2.35: no TensorRT in the uv env. LoRA steps still run; B2 needs "Fallback". |
 | `torch.version.cuda` is `None` | a CPU-only torch: stop and paste the output (not expected from this lock) |
 | 401 / 403 downloading Gemma | 401: redo `hf auth login`. 403: accept the Gemma license on huggingface.co, or allow gated repos on the token. |
 | `OFFLINE` / cache error in a job | the model isn't in `$HF_HOME/hub`: redo `setup-login.sh models` |
 | `uv: command not found` in a job | `env.sh` puts `~/.local/bin` on `PATH`; check that `setup-login.sh uv` ran |
 | `NOT SUBMITTED` from `submit.sh` | you answered no at the 14.0 GH200-hour prompt (or a header check failed) |
-| job stays `PD` | normal; `squeue --me --start` gives an estimate, and `--nice` makes the wait longer |
+| job stays `PD` | normal; `squeue --me --start` gives an estimate. `sprio -j <id>` shows the priority; if it is 1, a nice penalty is flooring it: `scontrol update jobid=<id> nice=0` |
 | no log file | `submit.sh` creates `logs/`; submit from `~/gaitlab` with `submit.sh`, not plain `sbatch` |

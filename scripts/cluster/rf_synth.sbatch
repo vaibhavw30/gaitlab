@@ -10,7 +10,7 @@
 #SBATCH --cpus-per-task=72
 #SBATCH --mem=100g
 #SBATCH --time=00:45:00
-#SBATCH --nice=1000
+#SBATCH --nice=0
 #SBATCH --output=logs/%x_%j.out
 set -euo pipefail
 cd "$HOME/gaitlab"

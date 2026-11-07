@@ -20,6 +20,9 @@ GAITLAB_ENV_MODE="${1:-login}"
 export GAITLAB_REPO="$HOME/gaitlab"
 export PATH="$HOME/.local/bin:$PATH" # uv
 export UV_PYTHON=3.11
+# uv's own CPython, not /usr/bin/python3.11: the system one ships no Python.h, and Triton
+# (pulled in by torch during training) compiles a C helper against it (CLUSTER.md, 2026-11-05).
+export UV_PYTHON_PREFERENCE=only-managed
 export UV_CACHE_DIR="$GAITLAB_STORE/uv-cache"
 export UV_PYTHON_INSTALL_DIR="$GAITLAB_STORE/uv-python"
 export UV_PROJECT_ENVIRONMENT="$GAITLAB_STORE/venv" # same filesystem as the cache: hardlinks
@@ -28,6 +31,7 @@ export UV_NO_SYNC=1                                 # `uv run` never changes the
 export HF_HOME="$GAITLAB_STORE/hf"                  # llm.runtime reads HF_HOME
 export HF_HUB_DISABLE_XET=1
 export APPTAINER_CACHEDIR="$GAITLAB_STORE/apptainer-cache"
+export TRITON_CACHE_DIR="$GAITLAB_STORE/triton-cache" # compiled kernels, not in $HOME
 export WANDB_MODE=disabled # W&B would turn on for CUDA runs; nodes have no internet
 export PYTHONDONTWRITEBYTECODE=1
 
@@ -37,5 +41,5 @@ elif [[ $GAITLAB_ENV_MODE != login ]]; then
   echo "env.sh: mode must be 'login' or 'job', got '$GAITLAB_ENV_MODE'" >&2
   return 2 2>/dev/null || exit 2
 fi
-mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$HF_HOME" "$APPTAINER_CACHEDIR"
+mkdir -p "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$HF_HOME" "$APPTAINER_CACHEDIR" "$TRITON_CACHE_DIR"
 echo "env.sh ($GAITLAB_ENV_MODE): store=$GAITLAB_STORE venv=$UV_PROJECT_ENVIRONMENT HF_HOME=$HF_HOME"
