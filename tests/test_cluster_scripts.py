@@ -5,6 +5,7 @@ Nothing here touches the network: sacct is stubbed and rsync runs between local 
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import shutil
@@ -231,8 +232,6 @@ def test_bench_and_gputest_jobs_call_what_they_say(tmp_path: Path):
 
 
 def _probe_module():
-    import importlib.util
-
     spec = importlib.util.spec_from_file_location("trt_probe", CLUSTER / "trt_probe.py")
     probe = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(probe)
@@ -302,3 +301,28 @@ def test_watcher_stays_silent_when_the_call_returns(tmp_path: Path):
     res = _watched(tmp_path, "5", "fast")
     assert res.returncode == 0 and "RETURNED" in res.stdout, res.stderr
     assert "HANG" not in res.stdout and not (tmp_path / "logs").exists()
+
+
+@pytest.mark.own_process
+@pytest.mark.skipif(
+    importlib.util.find_spec("torch") is None, reason="needs the 'llm' extra (torch)"
+)
+def test_every_probe_case_builds_and_runs_eagerly_on_cpu():
+    """What a probe job builds before TensorRT ever runs, so a broken case fails here, not after
+    a queue wait. Needs gemma-3-270m-it in the HF cache (skips otherwise)."""
+    import torch
+
+    from gaitlab.llm import runtime
+
+    if not runtime.is_cached("google/gemma-3-270m-it"):
+        pytest.skip("needs gemma-3-270m-it in the HF cache")
+    probe = _probe_module()
+    assert set(probe.BUILDERS) == set(probe.MODELS)
+    for name in probe.MODELS:
+        model, dtype = probe.parse_case(f"{name}-bf16")
+        module, args, extra = probe.BUILDERS[model](dtype, device="cpu")
+        with torch.no_grad():
+            out = module(*args)
+        assert bool(torch.isfinite(out).all()), name
+        if name == "gemmatorchops":
+            assert torch.ops.aten.embedding.default in extra["torch_executed_ops"]

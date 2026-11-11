@@ -2,10 +2,17 @@
 
     python scripts/cluster/trt_probe.py <model>[-<precision>]    e.g. tiny gemma-bf16 gemma1l-bf16
 
-Models: ``tiny`` (3-layer MLP), ``gemma`` (the Gemma 3 270M grade-scoring wrapper exactly as
-``bench.trt.bench_scoring`` builds it), ``gemma1l`` (the same with only its first decoder layer, to
-narrow a hang down). Precision ``fp16`` (default) or ``bf16``; Gemma 3 overflows fp16, so its fp16
-outputs are NaN by design (ADR-0015).
+Models:
+- ``tiny``: a 3-layer MLP (float input; ran fine on the GH200, job 3550685).
+- ``gemma``: the Gemma 3 270M grade-scoring wrapper exactly as ``bench.trt.bench_scoring``
+  builds it (int64 ids + mask in, 5 logits out).
+- Bisection of a ``gemma`` hang, one suspect each:
+  ``gemma1l`` only the first decoder layer; ``emb`` only the token-embedding lookup (int64 ids,
+  the 262k-row table); ``gemmanomask`` ids only, no attention mask or cumsum position ids;
+  ``gemmatorchops`` the full wrapper with embedding, cumsum, index_select and index left to PyTorch
+  (``torch_executed_ops``), so the engine holds only the dense layers.
+Precision ``fp16`` (default) or ``bf16``; Gemma 3 overflows fp16, so its fp16 outputs are NaN by
+design (ADR-0015).
 
 torch-tensorrt 2.14 has one merged runtime (``use_python_runtime`` is deprecated and ignored), so
 there is no runtime to choose. Each engine's ``requires_output_allocator`` flag and bindings are
@@ -30,7 +37,7 @@ import time
 from pathlib import Path
 
 DTYPES = {"fp16": "float16", "bf16": "bfloat16"}
-MODELS = ("tiny", "gemma", "gemma1l")
+MODELS = ("tiny", "gemma", "gemma1l", "emb", "gemmanomask", "gemmatorchops")
 MARK = "==ALL THREADS=="
 
 
@@ -123,32 +130,102 @@ def start_watcher(case: str, after_s: float) -> subprocess.Popen:
 # --- the probe ---------------------------------------------------------------------------------
 
 
-def _tiny(dtype: str):
+def _tiny(dtype: str, device: str = "cuda"):
     import torch
 
     dt = getattr(torch, dtype)
     m = torch.nn.Sequential(torch.nn.Linear(64, 64), torch.nn.GELU(), torch.nn.Linear(64, 5))
-    m = m.to("cuda", dt).eval()
-    return m, [torch.randn(4, 64, device="cuda", dtype=dt)], {"min_block_size": 1}
+    m = m.to(device, dt).eval()
+    return m, [torch.randn(4, 64, device=device, dtype=dt)], {"min_block_size": 1}
 
 
-def _gemma(dtype: str, layers: int | None = None):
-    from gaitlab.config import load_bench_config, load_train_lora_config
+def _grader(dtype: str, device: str, layers: int | None = None):
+    """The 270M grader, cast to ``dtype``, optionally cut to its first ``layers`` layers."""
+    from gaitlab.config import load_train_lora_config
     from gaitlab.llm import runtime
     from gaitlab.llm.grade import load_grader
 
-    g = load_grader("google/gemma-3-270m-it", cfg=load_train_lora_config(), device="cuda")
+    g = load_grader("google/gemma-3-270m-it", cfg=load_train_lora_config(), device=device)
     if layers is not None:
         cfg = g.model.config
         g.model.model.layers = g.model.model.layers[:layers]
         cfg.num_hidden_layers = layers
         if getattr(cfg, "layer_types", None):
             cfg.layer_types = cfg.layer_types[:layers]
-    w = g.scoring_wrapper().to(runtime.torch_dtype(dtype)).eval()
+    g.model.to(runtime.torch_dtype(dtype))
     g.dtype = dtype
     enc = g.scoring_inputs(["cadence_spm: 160.0 (iqr 2.0)"])
-    extra = {"optimization_level": load_bench_config().trt.optimization_level}  # as the bench
-    return w, [enc["input_ids"].to("cuda"), enc["attention_mask"].to("cuda")], extra
+    return g, enc["input_ids"].to(device), enc["attention_mask"].to(device)
+
+
+def _bench_extra() -> dict:
+    from gaitlab.config import load_bench_config
+
+    return {"optimization_level": load_bench_config().trt.optimization_level}  # as the bench
+
+
+def _gemma(dtype: str, device: str = "cuda", layers: int | None = None):
+    g, ids, mask = _grader(dtype, device, layers)
+    return g.scoring_wrapper().eval(), [ids, mask], _bench_extra()
+
+
+def _emb(dtype: str, device: str = "cuda"):
+    import torch
+
+    g, ids, _ = _grader(dtype, device)
+
+    class Embed(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.embed = g.model.model.embed_tokens  # scaled lookup, as in the model
+
+        def forward(self, input_ids):
+            return self.embed(input_ids)
+
+    return Embed().eval(), [ids], {**_bench_extra(), "min_block_size": 1}
+
+
+def _gemma_nomask(dtype: str, device: str = "cuda"):
+    import torch
+
+    g, ids, _ = _grader(dtype, device)
+
+    class NoMask(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.model = g.model
+            self.register_buffer("grade_ids", torch.tensor(list(g.tokens.ids)), persistent=False)
+
+        def forward(self, input_ids):
+            out = self.model(input_ids=input_ids, use_cache=False, logits_to_keep=1)
+            return out.logits[:, -1, :].index_select(-1, self.grade_ids)
+
+    return NoMask().to(device).eval(), [ids], _bench_extra()
+
+
+def _gemma_torchops(dtype: str, device: str = "cuda"):
+    import torch
+
+    module, args, extra = _gemma(dtype, device)
+    aten = torch.ops.aten
+    # every gather-like op in the exported graph (checked with torch.export on CPU)
+    ops = {
+        aten.embedding.default,
+        aten.cumsum.default,
+        aten.index_select.default,
+        aten.index.Tensor,
+    }
+    return module, args, {**extra, "torch_executed_ops": ops}
+
+
+BUILDERS = {
+    "tiny": _tiny,
+    "gemma": _gemma,
+    "gemma1l": lambda d, device="cuda": _gemma(d, device, layers=1),
+    "emb": _emb,
+    "gemmanomask": _gemma_nomask,
+    "gemmatorchops": _gemma_torchops,
+}
 
 
 def engine_lines(trt) -> list[str]:
@@ -171,8 +248,7 @@ def main(case: str) -> int:
     import torch_tensorrt
     from torch_tensorrt._features import ENABLED_FEATURES
 
-    builders = {"tiny": _tiny, "gemma": _gemma, "gemma1l": lambda d: _gemma(d, layers=1)}
-    module, args, extra = builders[model](dtype)
+    module, args, extra = BUILDERS[model](dtype)
     say = lambda msg: _say(case, msg)  # noqa: E731
     say(f"START torch_tensorrt {torch_tensorrt.__version__} features {ENABLED_FEATURES}")
     with torch.no_grad():
