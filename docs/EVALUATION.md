@@ -20,7 +20,7 @@ Every number a reader sees comes from here, through `report/results.py`. If it i
 | G5 | Are probabilities honest? | ECE (10 equal-width bins on max P), Brier (multiclass) | Test sessions | `results/grader/calibration.json` |
 | G6 | Is it consistent? | Identical-grade rate over 5 runs (greedy; and sampling at T=0.7 for cues) | Test sessions | `results/grader/consistency.json` |
 | B1 | How fast is each stage? | p50, p95, mean (ms) per stage; end-to-end fps; peak VRAM | Fixed 60-s clip | `results/bench/stages.json` |
-| B2 | What does TensorRT buy? | Speedup vs eager FP16 at batch 1 and 16, parity (argmax identical %, max \|ΔP\|) | Test prompts | `results/bench/trt.json` |
+| B2 | What does TensorRT buy? | Speedup vs eager at the same precision (bf16, ADR-0015) at batch 1 and 16, parity (argmax identical %, max \|ΔP\|) | Test prompts | `results/bench/trt.json` |
 
 ## 2. Grader ladder
 

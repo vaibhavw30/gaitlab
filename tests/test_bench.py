@@ -47,7 +47,7 @@ def _timing(p50: float) -> dict:
 def test_bench_yaml_loads_into_the_typed_model():
     cfg = load_bench_config("configs/bench.yaml")
     assert isinstance(cfg, BenchConfig)
-    assert cfg.batch_sizes == [1, 16] and cfg.precision == "fp16"
+    assert cfg.batch_sizes == [1, 16] and cfg.precision == "bf16"  # ADR-0015
     assert cfg.trt.ir == "dynamo" and cfg.trt.parity_required == 1.0
     with pytest.raises(ValueError):
         BenchConfig.model_validate({"precision": "int8"})
@@ -150,6 +150,27 @@ def test_cuda_time_refuses_without_cuda():
         cuda_time(lambda: None, warmup=1, iters=1)
 
 
+@pytest.mark.own_process
+@requires_270m
+def test_gemma3_overflows_fp16_so_the_bench_defaults_to_bf16():
+    """ADR-0015: Gemma 3's residual stream leaves the fp16 range on real tokens, so eager fp16
+    grade logits are non-finite on any device and an fp16 bench could never pass parity."""
+    import torch
+
+    from gaitlab.config import load_train_lora_config
+    from gaitlab.llm.grade import load_grader
+
+    g = load_grader(MODEL_270M, cfg=load_train_lora_config(), device="cpu")
+    enc = g.scoring_inputs(["cadence_spm: 160.0 (iqr 2.0)"])
+    finite = {}
+    for name in ("bfloat16", "float16"):
+        w = g.scoring_wrapper().to(runtime.torch_dtype(name)).eval()
+        with torch.no_grad():
+            finite[name] = bool(torch.isfinite(w(enc["input_ids"], enc["attention_mask"])).all())
+    assert finite == {"bfloat16": True, "float16": False}
+    assert BenchConfig().precision == "bf16" == load_bench_config("configs/bench.yaml").precision
+
+
 # --- CUDA ------------------------------------------------------------------------------------
 
 
@@ -180,7 +201,7 @@ def test_bench_scoring_compiles_and_reports_parity_on_270m():
     prompts = [f"cadence_spm: {150 + 5 * i}.0 (iqr 2.0)" for i in range(6)]
     cfg = BenchConfig.model_validate({"warmup_iters": 2, "measure_iters": 3, "batch_sizes": [1, 4]})
     m = bench_scoring(g, prompts, cfg)
-    assert m["precision"] == "fp16" and m["batch_sizes"] == [1, 4]
+    assert m["precision"] == "bf16" and m["batch_sizes"] == [1, 4]
     assert set(m["batch"]) == {"1", "4"}
     assert 0.0 <= m["parity"]["argmax_identical"] <= 1.0
     assert m["parity"]["n_prompts"] == 6

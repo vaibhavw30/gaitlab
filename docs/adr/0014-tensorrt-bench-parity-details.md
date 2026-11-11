@@ -1,6 +1,6 @@
 # ADR-0014: TensorRT bench details: static batches, worst-case parity, bf16 option
 
-- Status: accepted
+- Status: accepted; item 5's default (fp16) superseded by ADR-0015
 - Date: 2026-11-04
 
 ## Context

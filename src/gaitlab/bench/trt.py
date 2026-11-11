@@ -2,14 +2,14 @@
 
 Contract:
 ``bench_scoring(grader, prompts, cfg_bench) -> dict``
-1. Build ``ScoringWrapper`` (llm/grade.py) in FP16 (``cfg_bench.precision``; ``bf16`` is allowed
-   because Gemma 3 can overflow in FP16), eval mode, on CUDA. This casts ``grader.model`` in place.
+1. Build ``ScoringWrapper`` (llm/grade.py) in ``cfg_bench.precision`` (bf16 by default: Gemma 3's
+   residual stream overflows FP16, ADR-0015), eval mode, on CUDA. Casts ``grader.model`` in place.
 2. Inputs: ``grader.scoring_inputs(prompts)`` padded to ``max_prompt_tokens``; batch sizes from
    ``configs/bench.yaml`` (1 and 16). Prompts are cut into static batches; the last one is padded
    by repeating its last prompt and the padding rows are dropped (``static_batches``).
 3. Compile: ``torch_tensorrt.compile(wrapper, ir="dynamo", arg_inputs=[ids, mask],
-   use_explicit_typing=True, optimization_level=cfg.trt.optimization_level)``. Use explicit
-   typing with an FP16 model (``enabled_precisions`` is deprecated in recent Torch-TensorRT).
+   use_explicit_typing=True, optimization_level=cfg.trt.optimization_level)``. Explicit typing
+   keeps the model's own dtype (``enabled_precisions`` is deprecated in recent Torch-TensorRT).
    One compiled module per batch size (static shapes).
 4. Time eager and compiled with ``bench.latency.cuda_time`` (warmup/iters from config) on the first
    static batch.

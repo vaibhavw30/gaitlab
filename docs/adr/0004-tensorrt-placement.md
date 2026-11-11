@@ -1,6 +1,6 @@
 # ADR-0004: Where TensorRT goes
 
-- Status: accepted
+- Status: accepted; precision FP16 → bf16 by ADR-0015
 - Date: 2026-11-03
 
 ## Context

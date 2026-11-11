@@ -2,8 +2,9 @@
 # LAPTOP: send code, configs, .git and data/synthetic to ~/gaitlab on DeltaAI (docs/CLUSTER.md step 1).
 #   scripts/cluster/rsync-up.sh --dry-run   list what would be sent and check it; sends nothing
 #   scripts/cluster/rsync-up.sh             the same check, then the transfer
-# Never sent: .venv, .hf_cache, runs, results, models, logs, .env, tool caches, and everything
-# under data/ except data/synthetic. The check below refuses to transfer if any of those appear.
+# Never sent: .venv, .hf_cache, runs, results (except the tracked results/.gitkeep, so git on the
+# cluster sees a clean tree), models, logs, .env, tool caches, and everything under data/ except
+# data/synthetic. The check below refuses to transfer if any of those appear.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=laptop.sh
@@ -20,7 +21,8 @@ dest="${GAITLAB_RSYNC_DEST:-$DTAI_HOST:gaitlab/}" # override only in tests (a lo
 
 FILTERS=(
   --include=/data/ --include=/data/synthetic/ --include=/data/synthetic/** --exclude=/data/*
-  --exclude=/.venv/ --exclude=/.hf_cache/ --exclude=/runs/ --exclude=/results/
+  --include=/results/ --include=/results/.gitkeep --exclude=/results/*
+  --exclude=/.venv/ --exclude=/.hf_cache/ --exclude=/runs/
   --exclude=/models/ --exclude=/logs/
   --exclude=.env --exclude=.env.* --exclude=__pycache__/ --exclude=.pytest_cache/
   --exclude=.ruff_cache/ --exclude=.mypy_cache/ --exclude=.DS_Store
@@ -29,7 +31,8 @@ FILTERS=(
 listing="$(rsync -a --dry-run -v "${FILTERS[@]}" -e "$DTAI_RSYNC_SSH" ./ "$dest")"
 bad="$(printf '%s\n' "$listing" | awk '
   /^data\// && $0 != "data/" && $0 !~ /^data\/synthetic(\/|$)/ { print; next }
-  /^(\.venv|\.hf_cache|runs|results|models|logs)(\/|$)/ { print; next }
+  /^(\.venv|\.hf_cache|runs|models|logs)(\/|$)/ { print; next }
+  /^results(\/|$)/ && $0 != "results/" && $0 != "results/.gitkeep" { print; next }
   /(^|\/)\.env(\.|$)/ { print }')"
 if [[ -n $bad ]]; then
   printf 'REFUSING: these paths must not leave the laptop:\n%s\n' "$bad" >&2

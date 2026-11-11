@@ -151,7 +151,7 @@ class BenchConfig(_Strict):
     warmup_iters: int = 20
     measure_iters: int = 200
     batch_sizes: list[int] = Field(default_factory=lambda: [1, 16])
-    precision: Literal["fp16", "bf16"] = "fp16"
+    precision: Literal["fp16", "bf16"] = "bf16"  # Gemma 3 overflows fp16 (ADR-0015)
     clip: str = "data/raw/BENCH/natural.mp4"
     stages: list[str] = Field(
         default_factory=lambda: [

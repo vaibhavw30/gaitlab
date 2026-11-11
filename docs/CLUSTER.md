@@ -60,11 +60,13 @@ this project only.
 | `laptop.sh` | LAPTOP (sourced) | host and ssh options, shared by the others |
 | `ssh.sh [script]` | LAPTOP | ssh with the shared master connection; with a script, runs it on the login node |
 | `probe.sh` | login node (via `ssh.sh`) | round 1, read-only: host, OS, glibc, quota, allocation dirs, apptainer, internet |
-| `rsync-up.sh [--dry-run]` | LAPTOP | sends code, configs, `.git`, `data/synthetic`; refuses if anything else from `data/`, caches, runs, results or `.env` would go |
+| `rsync-up.sh [--dry-run]` | LAPTOP | sends code, configs, `.git`, `data/synthetic` and the tracked `results/.gitkeep` (without it git on the cluster reports a dirty tree); refuses if anything else from `data/` or `results/`, caches, runs or `.env` would go |
 | `env.sh [job]` | CLUSTER (sourced) | cache, venv and HF paths under `GAITLAB_STORE`; `job` mode adds `UV_OFFLINE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1` |
 | `setup-login.sh uv\|sync\|models` | login node | install uv, build the venv from `uv.lock`, download Gemma |
 | `gate.py` | in `rf_gate` | driver/CUDA 13, torch CUDA build on a GH200, TensorRT imports → `GATE RESULT PASS\|FAIL` |
-| `rf_gate.sbatch` (15 min), `rf_gputest.sbatch` (45 min), `rf_synth.sbatch` (45 min) | jobs | ghx4, 1 GPU, 72 cores, 100 GB (billed as 1 GH200), `--nice=0`, logs to `logs/<name>_<jobid>.out` |
+| `preflight.py probe\|gputest\|synth\|bench` | login node, **before every sbatch** | CPU-only, a few seconds, offline: DeltaAI host, clean git tree (FAIL for `bench`, which writes a result), `logs/` exists, the exports, venv, Python 3.11 with `Python.h`, packages, CUDA torch build, configs validate, bench precision not fp16, input files, synthetic run with adapter (`bench`), model cached + tokenizer + grade tokens offline → `PREFLIGHT RESULT PASS\|FAIL`. It can't see GPU-only failures |
+| `rf_gate.sbatch` (15 min), `rf_gputest.sbatch` (45 min), `rf_synth.sbatch` (45 min), `rf_trtprobe.sbatch [case…]` (35 min), `rf_bench.sbatch` (45 min) | jobs | ghx4, 1 GPU, 72 cores, 100 GB (billed as 1 GH200), `--nice=0`, `ulimit -c 0`, logs to `logs/<name>_<jobid>.out`. `rf_gputest` kills any single test after 20 min (`GAITLAB_CHILD_TIMEOUT_S=1200`, stack printed) and runs the rest. `rf_trtprobe` and `rf_bench` run python under `timeout --signal=ABRT` directly (not through `uv run`, which wouldn't pass the signal on), so a hang prints its stack |
+| `trt_probe.py <tiny\|gemma\|gemma1l>[-bf16]` | in `rf_trtprobe` | compiles one module with Torch-TensorRT (`gemma1l`: only the first decoder layer) and runs it once: `PROBE <case> START / EAGER OK / COMPILED / ENGINE … requires_output_allocator=… / RUN OK`. If the first engine call hasn't returned after 120 s, a watcher process prints `HANG`, `GPU` (utilisation) and `GDB` (native stack of the main thread, every thread's current frame), saves all threads to `logs/rf_trtprobe_<job>_<case>_gdb.txt`, then aborts the case so faulthandler adds the Python stack. Gemma fp16 cases are NaN by design (ADR-0015) |
 | `budget.sh [--next HH:MM:SS [partition]]` | login node | charged GH200-hours of `rf_*` jobs since 2026-11-04, used/remaining of 15.0; exit 3 (ASK) past 14.0 |
 | `submit.sh rf_…` | login node | checks the job header, runs `budget.sh --next <its limit>`, then `sbatch` |
 | `rsync-down.sh <run_id> [--with-results]` | LAPTOP | pulls `adapter/`, `trainer_state.json`, `run.json`, `config.json`, `SYNTHETIC`, `logs/rf_*.out` and, with the flag, `results/synthetic/**/*.json` |
@@ -210,14 +212,15 @@ Write `rf_*_ngc.sbatch` variants only if this is needed, and review them before 
 |---|---|
 | Login / compute OS, glibc | SLES 15 SP6, aarch64, glibc 2.38 on both (login: round 1; compute node gh116: `rf_gate` job 3534846, 2026-11-05) |
 | NVIDIA driver, max CUDA (`nvidia-smi`) | driver 595.71.05, CUDA 13.2; GPU `NVIDIA GH200 120GB`, compute capability (9, 0) |
-| torch, `torch.version.cuda`, cuDNN | torch 2.14.1+cu130, CUDA 13.0, cuDNN 9.24 (`92400`); Python 3.11.13 (system `/usr/bin/python3.11`), uv 0.13.7 |
+| torch, `torch.version.cuda`, cuDNN | torch 2.14.1+cu130, CUDA 13.0, cuDNN 9.24 (`92400`); Python 3.11.18 (uv-managed, under `$GAITLAB_STORE/uv-python`; see the Python row), uv 0.13.7 |
 | TensorRT, torch-tensorrt | 11.1.0.106, 2.14.0 from the uv env (`--extra trt` installs; no container needed). `import torch_tensorrt` needs a GPU (it queries the device at import), so it fails on login nodes by design |
 | `GAITLAB_STORE`, venv, HF_HOME | `/work/nvme/bhhv/vwudaru/gaitlab` (set from round 1); venv `$GAITLAB_STORE/venv`, HF_HOME `$GAITLAB_STORE/hf` (Gemma 1B + 270M) |
 | Python | **uv-managed CPython 3.11** (`UV_PYTHON_PREFERENCE=only-managed`). The system `/usr/bin/python3.11` has no `Python.h`, and Triton compiles `driver.c` against it on first use: `rf_synth` job 3536638 failed with `fatal error: Python.h: No such file or directory` |
 | Compute-node internet | reachable (`rf_gate`: pypi.org:443). Jobs still run with `UV_OFFLINE=1 HF_HUB_OFFLINE=1` so nothing is fetched mid-run |
 | Queue | `--nice=1000` floored priority to 1; `scontrol update jobid=<id> nice=0` (allowed for users) and a shorter `timelimit` on the pending job got it scheduled |
 | 1B LoRA dry run (`rf_synth`) | COMPLETED, job 3539884 (2026-11-06): 20 steps on synthetic SFT, then `predict --synthetic`; run `1b-20261106T161038Z-b9c09dee`. Synthetic, never reported. The earlier job 3536638 failed on `Python.h` and left a partial `runs/1b-20261106T080301Z-b9c09dee` |
-| `pytest -m gpu` on a GH200 | TBD. `test_cuda_time_on_gpu` passed (job 3536639); the TensorRT 270M test did not finish (jobs 3536639 time limit, 3539885 stopped by `timeout` inside `_probs` on the compiled module) |
+| `pytest -m gpu` on a GH200 | TBD. Passed in job 3539885: `test_cuda_scoring_matches_cpu_argmax`, `test_four_step_cuda_run_in_bf16`, `test_cuda_time_on_gpu`. The TensorRT 270M test compiled, then hung in the first engine call (`torch.ops.tensorrt.execute_engine`, C++ runtime): jobs 3536639 (time limit) and 3539885 (stopped by `timeout`). Probe job 3550685 (COMPLETED, 2026-11-07): a 3-layer MLP engine compiles and runs correctly; the Gemma 270M engine compiles and hangs in the first `execute_engine` call. torch-tensorrt 2.14 merged its Python and C++ runtimes, and `use_python_runtime` is deprecated and ignored (`dynamo/_compiler.py`), so there is no runtime to switch to; the C++ runtime (`lib/libtorchtrt_runtime.so`) is the one in use |
+| Bench precision | bf16 (ADR-0015): Gemma 3's residual stream overflows fp16, so fp16 grade logits are NaN on any device. Found on the laptop CPU before any GPU job used fp16 |
 | GPU-hours used (total, `budget.sh`) | TBD |
 
 ## Troubleshooting
@@ -232,5 +235,9 @@ Write `rf_*_ngc.sbatch` variants only if this is needed, and review them before 
 | `OFFLINE` / cache error in a job | the model isn't in `$HF_HOME/hub`: redo `setup-login.sh models` |
 | `uv: command not found` in a job | `env.sh` puts `~/.local/bin` on `PATH`; check that `setup-login.sh uv` ran |
 | `NOT SUBMITTED` from `submit.sh` | you answered no at the 14.0 GH200-hour prompt (or a header check failed) |
+| `PREFLIGHT … FAIL` | fix what the line names before `sbatch`; every FAIL would also fail the job, after the queue wait |
+| `killed after 1200 s (GAITLAB_CHILD_TIMEOUT_S)` in `rf_gputest` | that one test hung; the stack dump above the line shows where. The other tests still ran |
+| `PROBE <case> HANG` | the TensorRT engine hung on its first call; the `GPU` line says whether the GPU is busy (a kernel that never finishes) or idle (a host-side wait), the `GDB` lines where the C++ side is stuck |
+| Gemma probe or bench: `finite=False`, `n_nonfinite` > 0 | fp16: Gemma 3 overflows it. Use bf16 (the default since ADR-0015) |
 | job stays `PD` | normal; `squeue --me --start` gives an estimate. `sprio -j <id>` shows the priority; if it is 1, a nice penalty is flooring it: `scontrol update jobid=<id> nice=0` |
 | no log file | `submit.sh` creates `logs/`; submit from `~/gaitlab` with `submit.sh`, not plain `sbatch` |

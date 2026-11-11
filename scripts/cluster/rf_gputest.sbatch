@@ -16,5 +16,10 @@
 set -uo pipefail
 cd "$HOME/gaitlab" || exit 1
 source scripts/cluster/env.sh job || exit 1
+# Each GPU test runs in its own child pytest (tests/conftest.py). A child still running after
+# 20 min is killed with its stack printed, and the remaining tests run (the TensorRT test once
+# hung until Slurm killed the whole job).
+export GAITLAB_CHILD_TIMEOUT_S=1200 PYTHONFAULTHANDLER=1
+ulimit -c 0
 echo "== $(hostname) job ${SLURM_JOB_ID}"
 uv run pytest -m gpu -v -rs -p no:cacheprovider
