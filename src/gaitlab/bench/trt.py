@@ -7,17 +7,20 @@ Contract:
 2. Inputs: ``grader.scoring_inputs(prompts)`` padded to ``max_prompt_tokens``; batch sizes from
    ``configs/bench.yaml`` (1 and 16). Prompts are cut into static batches; the last one is padded
    by repeating its last prompt and the padding rows are dropped (``static_batches``).
-3. Compile: ``torch_tensorrt.compile(wrapper, ir="dynamo", arg_inputs=[ids, mask],
-   use_explicit_typing=True, optimization_level=cfg.trt.optimization_level)``. Explicit typing
-   keeps the model's own dtype (``enabled_precisions`` is deprecated in recent Torch-TensorRT).
-   One compiled module per batch size (static shapes).
+3. Compile: ``torch_tensorrt.compile(wrapper, arg_inputs=[ids, mask], **compile_options(cfg.trt))``
+   = ``ir="dynamo", use_explicit_typing=True, optimization_level=cfg.trt.optimization_level``,
+   plus ``torch_executed_ops`` when ``cfg.trt.torch_executed_ops`` names any
+   ("aten.<op>.<overload>", left to PyTorch; the rest of the graph is split into TensorRT engines
+   around them). Explicit
+   typing keeps the model's own dtype (``enabled_precisions`` is deprecated in recent
+   Torch-TensorRT). One compiled module per batch size (static shapes).
 4. Time eager and compiled with ``bench.latency.cuda_time`` (warmup/iters from config) on the first
    static batch.
 5. Parity over all test prompts, per batch size, against eager at the same precision: argmax
    identical fraction and max |ΔP| after softmax (``parity``); non-finite rows count as
    disagreements. The reported parity is the worst batch size (``combine_parity``). If parity <
    ``cfg.trt.parity_required`` (or any row is non-finite), ``speedup_reported = False`` and the
-   speedup fields are omitted (``assemble_metrics``).
+   speedup fields are omitted (``assemble_metrics``). The ops left to PyTorch are recorded.
 6. Return metrics for ``write_result("bench", "trt", ...)``: per batch size p50/p95/mean ms for
    both paths, speedups, parity, plus torch, torch_tensorrt, TensorRT, CUDA and cuDNN versions,
    the GPU name and its power limit (provenance also records GPU, driver and package versions).
@@ -89,6 +92,31 @@ def combine_parity(by_batch: Mapping[int, Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+def compile_options(trt_cfg) -> dict[str, Any]:
+    """``torch_tensorrt.compile`` keyword arguments from a ``TrtCfg`` (imports torch).
+
+    ``torch_executed_ops`` names are resolved to ``torch.ops.aten`` overloads; a name that doesn't
+    resolve raises ValueError. The key is omitted when the list is empty (whole graph in TensorRT).
+    """
+    opts: dict[str, Any] = {
+        "ir": trt_cfg.ir,
+        "use_explicit_typing": True,
+        "optimization_level": trt_cfg.optimization_level,
+    }
+    if trt_cfg.torch_executed_ops:
+        import torch
+
+        ops = set()
+        for name in trt_cfg.torch_executed_ops:
+            _, op, overload = name.split(".")
+            try:
+                ops.add(getattr(getattr(torch.ops.aten, op), overload))
+            except (AttributeError, RuntimeError) as e:
+                raise ValueError(f"torch_executed_ops: no such op {name!r}") from e
+        opts["torch_executed_ops"] = ops
+    return opts
+
+
 def assemble_metrics(
     timings: Mapping[int, Mapping[str, Mapping[str, float]]],
     parity_all: Mapping[str, Any],
@@ -96,6 +124,7 @@ def assemble_metrics(
     parity_required: float,
     precision: str,
     env: Mapping[str, Any],
+    torch_executed_ops: Sequence[str] = (),
 ) -> dict[str, Any]:
     """The B2 metrics dict. Speedups (eager / TensorRT) appear only if the parity gate passes."""
     reported = parity_all["argmax_identical"] >= parity_required and parity_all["n_nonfinite"] == 0
@@ -115,6 +144,7 @@ def assemble_metrics(
         "parity": dict(parity_all),
         "parity_required": parity_required,
         "speedup_reported": reported,
+        "torch_executed_ops": sorted(torch_executed_ops),
         "env": dict(env),
     }
 
@@ -180,6 +210,7 @@ def bench_scoring(grader, prompts: Sequence[str], cfg_bench) -> dict[str, Any]:
     enc = grader.scoring_inputs(list(prompts))
     ids, mask = enc["input_ids"].to("cuda"), enc["attention_mask"].to("cuda")
     n = len(prompts)
+    opts = compile_options(cfg_bench.trt)  # a bad op name fails before any compile
 
     timings: dict[int, dict[str, Any]] = {}
     parities: dict[int, dict[str, Any]] = {}
@@ -188,10 +219,7 @@ def bench_scoring(grader, prompts: Sequence[str], cfg_bench) -> dict[str, Any]:
         first = torch.as_tensor(chunks[0], device="cuda")
         ex_ids, ex_mask = ids.index_select(0, first), mask.index_select(0, first)
         with torch.no_grad():
-            compiled = torch_tensorrt.compile(
-                wrapper, ir=cfg_bench.trt.ir, arg_inputs=[ex_ids, ex_mask],
-                use_explicit_typing=True, optimization_level=cfg_bench.trt.optimization_level,
-            )  # fmt: skip
+            compiled = torch_tensorrt.compile(wrapper, arg_inputs=[ex_ids, ex_mask], **opts)
             parities[bs] = parity(
                 _probs(wrapper, ids, mask, chunks, n), _probs(compiled, ids, mask, chunks, n)
             )
@@ -204,4 +232,5 @@ def bench_scoring(grader, prompts: Sequence[str], cfg_bench) -> dict[str, Any]:
     return assemble_metrics(
         timings, combine_parity(parities), parity_required=cfg_bench.trt.parity_required,
         precision=cfg_bench.precision, env=_env(),
+        torch_executed_ops=cfg_bench.trt.torch_executed_ops,
     )  # fmt: skip

@@ -9,3 +9,4 @@ trt:
   ir: dynamo
   optimization_level: 3
   parity_required: 1.0             # fraction of test prompts with identical argmax grade
+  torch_executed_ops: []           # "aten.<op>.<overload>" left to PyTorch; [] = whole wrapper in TensorRT

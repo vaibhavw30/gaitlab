@@ -18,6 +18,7 @@ import pytest
 from gaitlab.bench.trt import (
     assemble_metrics,
     combine_parity,
+    compile_options,
     parity,
     read_test_prompts,
     static_batches,
@@ -51,6 +52,15 @@ def test_bench_yaml_loads_into_the_typed_model():
     assert cfg.trt.ir == "dynamo" and cfg.trt.parity_required == 1.0
     with pytest.raises(ValueError):
         BenchConfig.model_validate({"precision": "int8"})
+
+
+def test_torch_executed_ops_default_empty_and_named_as_aten_overloads():
+    assert BenchConfig().trt.torch_executed_ops == []
+    ok = BenchConfig.model_validate({"trt": {"torch_executed_ops": ["aten.cumsum.default"]}})
+    assert ok.trt.torch_executed_ops == ["aten.cumsum.default"]
+    for bad in ("cumsum", "aten.cumsum", "torch.cumsum.default", "aten..default"):
+        with pytest.raises(ValueError, match="aten"):
+            BenchConfig.model_validate({"trt": {"torch_executed_ops": [bad]}})
 
 
 def test_static_batches_pad_the_last_chunk_by_repeating_the_last_prompt():
@@ -88,6 +98,21 @@ def test_combined_parity_is_the_worst_batch_size():
     c = combine_parity({1: a, 16: b})
     assert c["argmax_identical"] == 0.75 and c["max_abs_dp"] == 0.2 and c["n_nonfinite"] == 1
     assert c["by_batch_size"] == {"1": a, "16": b}
+
+
+def _assemble_with_ops(ops: list[str]) -> dict:
+    par = {"argmax_identical": 1.0, "max_abs_dp": 0.0, "n_prompts": 4, "n_nonfinite": 0}
+    return assemble_metrics(
+        {1: {"eager": _timing(4.0), "trt": _timing(2.0)}}, combine_parity({1: par}),
+        parity_required=1.0, precision="bf16", env={"gpu": "test"}, torch_executed_ops=ops,
+    )  # fmt: skip
+
+
+def test_metrics_record_which_ops_stayed_in_pytorch():
+    """A partly compiled module is a different thing to time than a whole-graph engine."""
+    assert _assemble_with_ops([])["torch_executed_ops"] == []
+    m = _assemble_with_ops(["aten.index.Tensor", "aten.cumsum.default"])
+    assert m["torch_executed_ops"] == ["aten.cumsum.default", "aten.index.Tensor"]
 
 
 def _assemble(argmax_identical: float) -> dict:
@@ -148,6 +173,25 @@ def test_cuda_time_refuses_without_cuda():
         pytest.skip("CUDA present; covered by the gpu test")
     with pytest.raises(RuntimeError, match="CUDA"):
         cuda_time(lambda: None, warmup=1, iters=1)
+
+
+@pytest.mark.own_process
+@pytest.mark.skipif(not has_torch, reason="needs torch")
+def test_compile_options_resolve_op_names_to_aten_overloads():
+    import torch
+
+    from gaitlab.config import TrtCfg
+
+    opts = compile_options(TrtCfg(torch_executed_ops=["aten.cumsum.default", "aten.index.Tensor"]))
+    assert opts["torch_executed_ops"] == {torch.ops.aten.cumsum.default,
+                                          torch.ops.aten.index.Tensor}  # fmt: skip
+    assert opts["ir"] == "dynamo" and opts["use_explicit_typing"] is True
+    assert opts["optimization_level"] == 3
+    assert "torch_executed_ops" not in compile_options(TrtCfg())  # whole graph, as before
+    with pytest.raises(ValueError, match=r"aten\.nosuchop\.default"):
+        compile_options(TrtCfg(torch_executed_ops=["aten.nosuchop.default"]))
+    with pytest.raises(ValueError, match=r"aten\.cumsum\.nosuchoverload"):
+        compile_options(TrtCfg(torch_executed_ops=["aten.cumsum.nosuchoverload"]))
 
 
 @pytest.mark.own_process

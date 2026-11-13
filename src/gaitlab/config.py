@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class _Strict(BaseModel):
@@ -143,6 +143,18 @@ class TrtCfg(_Strict):
     ir: Literal["dynamo"] = "dynamo"
     optimization_level: int = 3
     parity_required: float = 1.0  # fraction of test prompts with identical argmax grade
+    # ops left to PyTorch ("aten.<op>.<overload>"); empty = the whole wrapper in TensorRT
+    torch_executed_ops: list[str] = Field(default_factory=list)
+
+    @field_validator("torch_executed_ops")
+    @classmethod
+    def _aten_names(cls, v: list[str]) -> list[str]:
+        for name in v:
+            parts = name.split(".")
+            if len(parts) != 3 or parts[0] != "aten" or not all(parts):
+                msg = f"torch_executed_ops: expected 'aten.<op>.<overload>', got {name!r}"
+                raise ValueError(msg)
+        return v
 
 
 class BenchConfig(_Strict):

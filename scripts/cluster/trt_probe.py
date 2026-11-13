@@ -11,6 +11,12 @@ Models:
   the 262k-row table); ``gemmanomask`` ids only, no attention mask or cumsum position ids;
   ``gemmatorchops`` the full wrapper with embedding, cumsum, index_select and index left to PyTorch
   (``torch_executed_ops``), so the engine holds only the dense layers.
+- Jobs 3581071 / 3581191: ``gemma`` and ``gemma1l`` hang; ``emb``, ``gemmanomask`` and
+  ``gemmatorchops`` run. In the no-mask graph every cumsum and index op depends on shapes only
+  (folded at compile time); in the mask wrapper one cumsum (position ids) and two index ops
+  (padding-mask lookup) depend on the runtime ``attention_mask``. One suspect each:
+  ``gemmacumsumtorch`` leaves only ``aten.cumsum`` to PyTorch; ``gemmaindextorch`` only
+  ``aten.index.Tensor``.
 Precision ``fp16`` (default) or ``bf16``; Gemma 3 overflows fp16, so its fp16 outputs are NaN by
 design (ADR-0015).
 
@@ -37,7 +43,10 @@ import time
 from pathlib import Path
 
 DTYPES = {"fp16": "float16", "bf16": "bfloat16"}
-MODELS = ("tiny", "gemma", "gemma1l", "emb", "gemmanomask", "gemmatorchops")
+MODELS = (
+    "tiny", "gemma", "gemma1l", "emb", "gemmanomask", "gemmatorchops", "gemmacumsumtorch",
+    "gemmaindextorch",
+)  # fmt: skip
 MARK = "==ALL THREADS=="
 
 
@@ -218,6 +227,18 @@ def _gemma_torchops(dtype: str, device: str = "cuda"):
     return module, args, {**extra, "torch_executed_ops": ops}
 
 
+def _gemma_one_op_in_torch(op_name: str):
+    def build(dtype: str, device: str = "cuda"):
+        import torch
+
+        module, args, extra = _gemma(dtype, device)
+        name, overload = op_name.split(".")
+        op = getattr(getattr(torch.ops.aten, name), overload)
+        return module, args, {**extra, "torch_executed_ops": {op}}
+
+    return build
+
+
 BUILDERS = {
     "tiny": _tiny,
     "gemma": _gemma,
@@ -225,6 +246,8 @@ BUILDERS = {
     "emb": _emb,
     "gemmanomask": _gemma_nomask,
     "gemmatorchops": _gemma_torchops,
+    "gemmacumsumtorch": _gemma_one_op_in_torch("cumsum.default"),
+    "gemmaindextorch": _gemma_one_op_in_torch("index.Tensor"),
 }
 
 
