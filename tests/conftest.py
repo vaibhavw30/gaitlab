@@ -6,6 +6,12 @@ import sys
 
 import pytest
 
+# Typer forces rich terminal output when GITHUB_ACTIONS (or FORCE_COLOR / PY_COLORS) is set, which
+# styles option names ("--session" becomes "-" + "-session" in ANSI codes), so CLI error text is
+# never a plain substring on CI. Typer reads this switch when it's first imported, before any test
+# module imports gaitlab.cli; children of own_process tests inherit it.
+os.environ["_TYPER_FORCE_DISABLE_TERMINAL"] = "1"
+
 from gaitlab.config import FeaturesConfig, PipelineConfig, load_features_config
 
 
