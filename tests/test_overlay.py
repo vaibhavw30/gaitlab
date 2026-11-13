@@ -185,3 +185,52 @@ def test_render_overlay_on_a_video(clip, tmp_path: Path):
             c.mux(p)
     out = render_overlay(seq, an, str(tmp_path / "o.mp4"), video_path=str(src), max_seconds=1.0)
     assert probe(str(out)).n_frames == int(np.sum(seq.t < 1.0))
+
+
+@requires_pil
+def test_a_time_range_renders_exactly_those_frames_with_whole_clip_annotations(clip):
+    """The labeling app shows one window's [t_start, t_end]; events and angles still come from
+    the whole clip, so a ranged frame is identical to the same frame of the full render."""
+    from gaitlab.viz.overlay import frame_range, render_frames
+
+    seq, an = clip
+    start, stop = frame_range(seq.t, (1.0, 2.0))
+    assert seq.t[start] >= 1.0 and seq.t[start - 1] < 1.0
+    assert seq.t[stop - 1] <= 2.0 and (stop == seq.n_frames or seq.t[stop] > 2.0)
+    full = list(render_frames(seq, an))
+    part = list(render_frames(seq, an, start=start, max_frames=stop))
+    assert len(part) == stop - start
+    np.testing.assert_array_equal(part[0], full[start])
+    np.testing.assert_array_equal(part[-1], full[stop - 1])
+    with pytest.raises(ValueError, match="no frames"):
+        frame_range(seq.t, (50.0, 60.0))
+
+
+@requires_av
+@requires_pil
+def test_render_overlay_time_range_mp4_starts_at_zero(clip, tmp_path: Path):
+    from gaitlab.io.video import iter_frames, probe
+    from gaitlab.viz.overlay import frame_range, render_overlay
+
+    seq, an = clip
+    out = render_overlay(seq, an, str(tmp_path / "w.mp4"), t_range=(1.0, 2.0))
+    start, stop = frame_range(seq.t, (1.0, 2.0))
+    assert probe(str(out)).n_frames == stop - start
+    t = np.array([ts for ts, _ in iter_frames(str(out))])
+    np.testing.assert_allclose(t, seq.t[start:stop] - seq.t[start], atol=1e-3)
+    with pytest.raises(ValueError, match="not both"):
+        render_overlay(seq, an, str(tmp_path / "x.mp4"), max_seconds=1.0, t_range=(0.0, 1.0))
+
+
+@requires_pil
+def test_blind_overlay_draws_no_angle_or_cadence_text(clip):
+    """Blind re-grade hides the features (TECHNICAL_PLAN §6): the skeleton stays, numbers go."""
+    from gaitlab.viz.overlay import CANVAS_COLOR, render_frames
+
+    seq, an = clip
+    with_text = next(iter(render_frames(seq, an)))
+    blind = next(iter(render_frames(seq, an, numbers=False)))
+    corner = (slice(0, 20), slice(0, 60))  # where the text box goes
+    assert (with_text[corner] != CANVAS_COLOR).any()
+    assert (blind[corner] == CANVAS_COLOR).all()
+    assert (blind != CANVAS_COLOR).any(), "the skeleton is still drawn"

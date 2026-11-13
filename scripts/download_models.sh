@@ -10,5 +10,6 @@ curl -fL "$URL" -o models/pose_landmarker_heavy.task
 if command -v sha256sum >/dev/null; then SHA="sha256sum"; else SHA="shasum -a 256"; fi
 $SHA models/pose_landmarker_heavy.task | tee models/pose_landmarker_heavy.task.sha256
 echo "Saved models/pose_landmarker_heavy.task"
-# RTMPose (rtmlib) downloads its ONNX models on first use into its own cache.
+# RTMPose: pose/rtmpose_backend.py has rtmlib download its ONNX models (YOLOX + Halpe-26) on
+# first use into models/rtmlib/ (inside the repo), not rtmlib's default ~/.cache.
 # Gemma weights come from Hugging Face on first `gaitlab train` (accept the license first).

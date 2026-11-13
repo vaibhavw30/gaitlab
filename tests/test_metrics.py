@@ -76,3 +76,18 @@ def test_reliability_table_bins_by_max_probability():
     assert top["count"] == 2 and top["accuracy"] == 0.5
     assert top["confidence"] == pytest.approx(0.875)
     assert bins[0]["count"] == 0 and bins[0]["accuracy"] is None
+
+
+def test_confusion_counts_rows_are_true_grades_columns_predicted():
+    c = m.confusion_counts([1, 1, 3, 5, 5], [1, 2, 3, 4, 5])
+    assert c.shape == (5, 5) and c.dtype.kind == "i"
+    assert c[0].tolist() == [1, 1, 0, 0, 0]  # true 1: once right, once predicted 2
+    assert c[4].tolist() == [0, 0, 0, 1, 1]
+    assert c.sum() == 5 and c[1].sum() == 0  # no true 2s: empty row, still present
+
+
+def test_confusion_counts_refuses_grades_outside_1_to_5():
+    with pytest.raises(ValueError, match=r"1\.\.5"):
+        m.confusion_counts([1, 6], [1, 2])
+    with pytest.raises(ValueError, match="length"):
+        m.confusion_counts([1, 2], [1])

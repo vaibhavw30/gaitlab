@@ -141,7 +141,9 @@ def _fmt(x: float | None, unit: str) -> str:
     return "--" if x is None or not np.isfinite(x) else f"{x:5.1f}{unit}"
 
 
-def _draw_frame(img, seq: KeypointSeq, i: int, a: FrameAnnotation, side: str, font) -> None:
+def _draw_frame(
+    img, seq: KeypointSeq, i: int, a: FrameAnnotation, side: str, font, numbers: bool = True
+) -> None:
     from PIL import ImageDraw
 
     draw = ImageDraw.Draw(img)
@@ -179,20 +181,26 @@ def _draw_frame(img, seq: KeypointSeq, i: int, a: FrameAnnotation, side: str, fo
         draw.rectangle([toe[0] - rr, toe[1] - rr, toe[0] + rr, toe[1] + rr], outline=TO_COLOR,
                        width=lw)  # fmt: skip
 
+    pad = max(4, round(h / 100))
+    if numbers:
+        _draw_numbers(draw, a, side, font, pad)
+    if seq.synthetic:
+        mark = "SYNTHETIC"
+        mb = draw.textbbox((0, 0), mark, font=font)
+        draw.text((w - (mb[2] - mb[0]) - pad, pad), mark, fill=WATERMARK_COLOR, font=font)
+
+
+def _draw_numbers(draw, a: FrameAnnotation, side: str, font, pad: int) -> None:
+    """Near-side knee and shin angles, cadence and time, top left."""
     s = side.upper()
     lines = [
         f"{s} knee {_fmt(a.knee_flex_deg, '°')}   {s} shin {_fmt(a.shin_angle_deg, '°')}",
         f"cadence {_fmt(a.cadence_spm, ' spm')}   t {a.t:6.2f} s",
     ]
-    pad = max(4, round(h / 100))
     box = draw.multiline_textbbox((pad, pad), "\n".join(lines), font=font)
     draw.rectangle([box[0] - pad // 2, box[1] - pad // 2, box[2] + pad // 2, box[3] + pad // 2],
                    fill=(0, 0, 0))  # fmt: skip
     draw.multiline_text((pad, pad), "\n".join(lines), fill=TEXT_COLOR, font=font)
-    if seq.synthetic:
-        mark = "SYNTHETIC"
-        mb = draw.textbbox((0, 0), mark, font=font)
-        draw.text((w - (mb[2] - mb[0]) - pad, pad), mark, fill=WATERMARK_COLOR, font=font)
 
 
 def render_frames(
@@ -201,6 +209,8 @@ def render_frames(
     background: Iterable[np.ndarray] | None = None,
     hold_s: float = HOLD_S,
     max_frames: int | None = None,
+    start: int = 0,
+    numbers: bool = True,
 ) -> Iterator[np.ndarray]:
     """Yield one annotated RGB uint8 (H, W, 3) frame per keypoint frame.
 
@@ -211,7 +221,13 @@ def render_frames(
     background : iterable of (H, W, 3) uint8, optional
         Video frames 1:1 with ``seq``; a plain canvas of ``seq.size`` if None.
     max_frames : int, optional
-        Stop after this many frames (the background need only be that long).
+        Stop before this frame index (the background need only be that long).
+    start : int
+        First frame index to yield; earlier background frames are read and dropped. Events and
+        angles are still annotated from the whole clip.
+    numbers : bool
+        Draw the angle / cadence text. False for blind re-grading (the skeleton and IC/TO
+        markers stay).
     """
     from PIL import Image, ImageFont
 
@@ -221,6 +237,10 @@ def render_frames(
     font = ImageFont.load_default(size=max(10, round(h / 36)))
     bg_iter = iter(background) if background is not None else None
     for i in range(n):
+        if i < start:
+            if bg_iter is not None and next(bg_iter, None) is None:
+                raise ValueError(f"video has {i} frames, keypoints have {seq.n_frames}")
+            continue
         if bg_iter is None:
             img = Image.new("RGB", (w, h), CANVAS_COLOR)
         else:
@@ -232,7 +252,7 @@ def render_frames(
                     f"video frame size {frame.shape[1]}x{frame.shape[0]} != keypoint size {w}x{h}"
                 )
             img = Image.fromarray(np.asarray(frame, dtype=np.uint8), "RGB")
-        _draw_frame(img, seq, i, ann[i], analysis.side, font)
+        _draw_frame(img, seq, i, ann[i], analysis.side, font, numbers)
         yield np.asarray(img)
     if bg_iter is not None and max_frames is None and next(bg_iter, None) is not None:
         raise ValueError(f"video has more frames than the keypoints ({seq.n_frames})")
@@ -289,6 +309,16 @@ def _write_gif(frames: Iterator[np.ndarray], t: np.ndarray, out: Path, comment: 
     )
 
 
+def frame_range(t: np.ndarray, t_range: tuple[float, float]) -> tuple[int, int]:
+    """[start, stop) frame indices with ``t_range[0] <= t <= t_range[1]`` (t in s, sorted)."""
+    t = np.asarray(t, dtype=np.float64)
+    start = int(np.searchsorted(t, t_range[0], side="left"))
+    stop = int(np.searchsorted(t, t_range[1], side="right"))
+    if stop <= start:
+        raise ValueError(f"no frames in {t_range} (clip spans {t[0]:.3f}-{t[-1]:.3f} s)")
+    return start, stop
+
+
 def render_overlay(
     seq: KeypointSeq,
     analysis: ClipAnalysis,
@@ -296,23 +326,35 @@ def render_overlay(
     video_path: str | None = None,
     gif: bool = False,
     max_seconds: float | None = None,
+    t_range: tuple[float, float] | None = None,
+    numbers: bool = True,
 ) -> Path:
     """Render the overlay to ``out_path`` (mp4, or GIF if ``gif``) and return the path.
 
     ``video_path`` is optional: without it the skeleton is drawn on a plain canvas sized from
-    ``seq.size``. ``max_seconds`` keeps frames with ``t < max_seconds``.
+    ``seq.size``. ``max_seconds`` keeps frames with ``t < max_seconds``; ``t_range`` keeps
+    ``t_start <= t <= t_end`` (one window, for the labeling app), timed from its first frame.
+    ``numbers=False`` leaves out the angle / cadence text (blind re-grade).
     """
+    if max_seconds is not None and t_range is not None:
+        raise ValueError("give max_seconds or t_range, not both")
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     t = np.asarray(seq.t, dtype=np.float64)
-    max_frames = int(np.sum(t < max_seconds)) if max_seconds is not None else None
+    start, max_frames = 0, None
+    if max_seconds is not None:
+        max_frames = int(np.sum(t < max_seconds))
+    if t_range is not None:
+        start, max_frames = frame_range(t, t_range)
     background = None
     if video_path is not None:
         from gaitlab.io.video import iter_frames
 
         background = (img for _, img in iter_frames(video_path))
-    frames = render_frames(seq, analysis, background, max_frames=max_frames)
-    t_used = t[:max_frames] if max_frames is not None else t
+    frames = render_frames(
+        seq, analysis, background, max_frames=max_frames, start=start, numbers=numbers
+    )
+    t_used = t[start:max_frames] if max_frames is not None else t
     label = "SYNTHETIC keypoints; never report" if seq.synthetic else f"gaitlab {seq.backend}"
     if gif:
         _write_gif(frames, t_used, out, comment=label)

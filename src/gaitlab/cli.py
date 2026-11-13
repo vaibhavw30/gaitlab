@@ -7,18 +7,19 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
 import typer
 
 from gaitlab.config import load_features_config, load_pipeline_config
 
 if TYPE_CHECKING:
     from gaitlab.config import PipelineConfig
-    from gaitlab.types import KeypointSeq
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="GaitLab running-form grader")
 
 CFG = typer.Option("configs/default.yaml", help="pipeline config")
 FCFG = typer.Option("configs/features.yaml", help="features/tags config")
+ONLY_SESSIONS = typer.Option(None, help="only these sessions (repeat the option)")
 
 
 def _todo(task: str) -> None:
@@ -26,15 +27,93 @@ def _todo(task: str) -> None:
     raise typer.Exit(code=2)
 
 
+def _video_path(raw: str, base: Path) -> Path:
+    """A sessions.csv ``path``: as given if it exists, else relative to the CSV's folder."""
+    p = Path(raw)
+    return p if p.is_absolute() or p.exists() else base / p
+
+
+def _backend_kwargs(name: str, cfg: PipelineConfig) -> dict:
+    if name == "mediapipe":
+        return {"model_path": cfg.pose.mediapipe_model}
+    if name == "rtmpose":
+        return {"mode": cfg.pose.rtmpose_mode}
+    raise typer.BadParameter(f"--backend must be mediapipe or rtmpose, got {name!r}")
+
+
 @app.command()
 def extract(
-    session: str = typer.Option(...),
-    backend: str = typer.Option("mediapipe"),
-    allow_low_fps: bool = False,
+    session: str = typer.Option(..., help="session id: every clip of it in --sessions"),
+    backend: str | None = typer.Option(None, help="mediapipe | rtmpose (default: config)"),
+    sessions: str = typer.Option(
+        "data/sessions.csv", help="sessions CSV; npz go to <its dir>/interim/<session>/"
+    ),
+    clip: str | None = typer.Option(None, help="only this clip id"),
+    allow_low_fps: bool = typer.Option(False, help="accept clips below capture.min_fps"),
+    overwrite: bool = typer.Option(False, help="re-extract clips that already have an npz"),
     config: str = CFG,
 ) -> None:
-    """video → KeypointSeq npz for every clip in a session (TASKS M0)."""
-    _todo("extract (io.video + pose backends)")
+    """video → KeypointSeq npz for every clip in a session (TASKS M0).
+
+    Writes ``<sessions dir>/interim/<session>/<clip>.<backend>.npz``, which ``process --session``
+    reads. Frame times are container PTS (io.video); the npz meta records the video's sha256,
+    its VFR flag and codec. Standing clips are extracted too (foot-angle offset).
+    """
+    from gaitlab.data.sessions import load_sessions
+    from gaitlab.io.video import LowFpsError, check_fps, iter_frames, probe
+    from gaitlab.pose import base as pose_base
+    from gaitlab.pose.mediapipe_backend import file_sha256
+
+    cfg = load_pipeline_config(config)
+    name = backend or cfg.pose.backend
+    kwargs = _backend_kwargs(name, cfg)
+    rows = [r for r in load_sessions(sessions) if r.session_id == session]
+    if not rows:
+        raise typer.BadParameter(f"no rows for session {session} in {sessions}")
+    if clip is not None:
+        rows = [r for r in rows if r.clip_id == clip]
+        if not rows:
+            raise typer.BadParameter(f"session {session} has no clip {clip!r}")
+    base = Path(sessions).parent
+    out_dir = base / "interim" / session
+    # check every clip before the slow part, so a bad row fails in seconds, not mid-session
+    todo = []
+    for r in rows:
+        video = _video_path(r.path, base)
+        if video.suffix == ".npz":
+            raise typer.BadParameter(
+                f"{r.clip_id}: {r.path} is already keypoints; use `gaitlab process`"
+            )
+        if not video.exists():
+            raise typer.BadParameter(f"{r.clip_id}: video {video} not found")
+        info = probe(str(video))
+        try:
+            check_fps(info, cfg.capture, allow_low_fps)
+        except LowFpsError as e:
+            raise typer.BadParameter(str(e)) from e
+        if abs(info.fps - r.fps) > 0.01 * r.fps:
+            typer.secho(f"{r.clip_id}: sessions.csv fps {r.fps} != video {info.fps:.2f}",
+                        fg=typer.colors.YELLOW)  # fmt: skip
+        if info.vfr:
+            typer.secho(f"{r.clip_id}: variable frame rate; timing uses PTS (ADR-0010)",
+                        fg=typer.colors.YELLOW)  # fmt: skip
+        todo.append((r, video, info))
+    est = None
+    for r, video, info in todo:
+        dest = out_dir / f"{r.clip_id}.{name}.npz"
+        if dest.exists() and not overwrite:
+            typer.echo(f"skip {dest} (exists; --overwrite to redo)")
+            continue
+        est = est or pose_base.get_backend(name, **kwargs)
+        seq = est.run(iter_frames(str(video)), info.fps, info.size)
+        seq.meta.update(
+            session_id=session, clip_id=r.clip_id, video=video.name,
+            video_sha256=file_sha256(video), vfr=bool(info.vfr), codec=info.codec,
+        )  # fmt: skip
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        seq.save(str(dest))
+        n_missing = int((~np.isfinite(seq.xy).all(axis=(1, 2))).sum())
+        typer.echo(f"{r.clip_id}: {seq.n_frames} frames ({n_missing} without a person) → {dest}")
 
 
 def _clip_ids(clip: Path) -> tuple[str, str]:
@@ -50,38 +129,6 @@ def _condition_from_clip_id(clip_id: str) -> str:
 
     cond = clip_id.split("-")[0]
     return cond if cond in get_args(Condition) else ""
-
-
-def _analyze_rows(
-    seq: KeypointSeq,
-    cfg: PipelineConfig,
-    session_id: str,
-    clip_id: str,
-    condition: str,
-    speed_kmh: float | None,
-    standing_seq: KeypointSeq | None,
-) -> tuple[list[dict], list[dict]]:
-    """One clip → (strides rows, windows rows), each tagged with the sequence's synthetic flag."""
-    from gaitlab.gait.features import analyze_clip, knee_cycle_curve
-    from gaitlab.gait.windows import make_windows
-
-    res = analyze_clip(seq, cfg, standing=standing_seq)
-    flag = {"synthetic": seq.synthetic}
-    strides = [
-        {
-            "session_id": session_id,
-            "clip_id": clip_id,
-            "condition": condition,
-            **s.__dict__,
-            "knee_flex_cycle_deg": knee_cycle_curve(
-                res.xy_up, seq.t, res.side, s.ic_frame, s.next_ic_frame
-            ),
-            **flag,
-        }
-        for s in res.strides
-    ]
-    wins = make_windows(res.strides, session_id, clip_id, cfg.windows, condition, speed_kmh)
-    return strides, [{**w.flat(), **flag} for w in wins]
 
 
 def _write_processed(
@@ -123,6 +170,7 @@ def process(
 
     Outputs from synthetic keypoints carry ``synthetic=True`` and a SYNTHETIC marker file.
     """
+    from gaitlab.data.analysis import analyze_session, clip_rows
     from gaitlab.types import KeypointSeq
 
     if (session is None) == (clip is None):
@@ -136,7 +184,7 @@ def process(
         seq = KeypointSeq.load(str(path))
         standing_seq = KeypointSeq.load(standing) if standing else None
         cond = condition if condition is not None else _condition_from_clip_id(cid)
-        strides, windows = _analyze_rows(seq, cfg, sid, cid, cond, speed_kmh, standing_seq)
+        strides, windows = clip_rows(seq, cfg, sid, cid, cond, speed_kmh, standing_seq)
         root = Path("data/synthetic") if seq.synthetic else Path("data")
         dest = Path(out) if out else root / "processed" / sid
         _write_processed(dest, f"{cid}.", strides, windows, seq.synthetic)
@@ -148,24 +196,8 @@ def process(
     if not rows:
         raise typer.BadParameter(f"no rows for session {session} in {sessions}")
     base = Path(sessions).parent
-    interim = base / "interim" / session
-    standing_row = next((r for r in rows if r.condition == "standing"), None)
-    standing_seq = (
-        KeypointSeq.load(str(interim / f"{standing_row.clip_id}.{backend}.npz"))
-        if standing_row
-        else None
-    )
-    strides_out, windows_out, flags = [], [], set()
-    for r in rows:
-        if r.condition == "standing":
-            continue
-        seq = KeypointSeq.load(str(interim / f"{r.clip_id}.{backend}.npz"))
-        flags.add(seq.synthetic)
-        s_rows, w_rows = _analyze_rows(
-            seq, cfg, session, r.clip_id, r.condition, r.speed_kmh, standing_seq
-        )
-        strides_out.extend(s_rows)
-        windows_out.extend(w_rows)
+    done = analyze_session(rows, base / "interim" / session, backend, cfg)
+    strides_out, windows_out, flags = done.strides, done.windows, done.synthetic
     if len(flags) > 1:
         raise typer.BadParameter(f"session {session} mixes synthetic and real keypoints")
     synthetic = flags == {True}
@@ -246,9 +278,35 @@ def overlay(
 
 
 @app.command()
-def label(blind: int = typer.Option(0, help="blind re-grade N windows")) -> None:
-    """Labeling app (TASKS M2)."""
-    _todo("labeling app (label.app)")
+def label(
+    blind: int = typer.Option(0, help="blind re-grade N labeled windows (0 = normal mode)"),
+    rater: str = typer.Option("vw", help="rater id written to every row"),
+    seed: int = typer.Option(0, help="seed for the blind sample"),
+    synthetic: bool = typer.Option(
+        False, "--synthetic", help="label gaitlab synth windows → data/synthetic/labels/"
+    ),
+    root: str | None = typer.Option(None, help="data root (default data, or data/synthetic)"),
+    backend: str | None = typer.Option(None, help="npz backend (default: pose.backend)"),
+    port: int = typer.Option(7860, help="localhost port"),
+    browser: bool = typer.Option(True, "--browser/--no-browser", help="open a browser tab"),
+    config: str = CFG,
+    features: str = FCFG,
+) -> None:
+    """Labeling app: grade windows with overlay and features (TECHNICAL_PLAN §6, TASKS M2)."""
+    from gaitlab.label import app as label_app
+
+    data_root = Path(root) if root else Path("data/synthetic" if synthetic else "data")
+    npz_backend = backend or (
+        "synthetic" if synthetic else load_pipeline_config(config).pose.backend
+    )
+    try:
+        ctx = label_app.prepare(
+            data_root, synthetic=synthetic, backend=npz_backend, rater=rater, blind=blind,
+            seed=seed, pipeline_config=config, features_config=features,
+        )  # fmt: skip
+    except (ValueError, FileNotFoundError) as e:
+        raise typer.BadParameter(str(e)) from e
+    label_app.launch(ctx, port=port, open_browser=browser)
 
 
 SYN_ROOT = typer.Option("data/synthetic", "--root", help="gaitlab synth output folder")
@@ -458,9 +516,32 @@ def eval_(
 
 
 @app.command()
-def validate(target: str = typer.Argument(..., help="biocv | mocap")) -> None:
-    """Event/feature validation on public data (TASKS M0)."""
-    _todo(f"validate {target}")
+def validate(
+    target: str = typer.Argument(..., help="own | biocv | mocap"),
+    sessions: str = typer.Option("data/sessions.csv", help="own: sessions CSV; npz from interim/"),
+    backend: str | None = typer.Option(None, help="own: pose backend (default: config)"),
+    other: str | None = typer.Option(None, help="own: second backend for V7 agreement"),
+    session: list[str] | None = ONLY_SESSIONS,
+    synthetic: bool = typer.Option(False, help="own: on gaitlab synth keypoints"),
+    n_boot: int | None = typer.Option(None, help="bootstrap resamples (default: config)"),
+    results: str = typer.Option("results", help="results root"),
+    config: str = CFG,
+) -> None:
+    """Validation. ``own``: V5 directions, V6 stability and (with --other) V7 backend agreement
+    on your sessions → results/validation. ``biocv`` / ``mocap``: public data (TASKS M0)."""
+    if target != "own":
+        _todo(f"validate {target}")
+    from gaitlab.eval.own_validation import run
+
+    backend = backend or load_pipeline_config(config).pose.backend
+    try:
+        out = run(sessions, backend=backend, other=other, synthetic=synthetic,
+                  config_path=config, n_boot=n_boot, session_ids=session or None,
+                  results_root=results)  # fmt: skip
+    except (ValueError, FileNotFoundError) as e:
+        raise typer.BadParameter(str(e)) from e
+    for path in out.values():
+        typer.echo(f"→ {path}")
 
 
 @app.command()

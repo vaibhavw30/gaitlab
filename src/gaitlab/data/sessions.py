@@ -64,3 +64,44 @@ def latest_normal_labels(rows: list[LabelRow]) -> dict[str, LabelRow]:
         if r.mode == "normal":
             out[r.window_id] = r
     return out
+
+
+LABEL_FIELDS: tuple[str, ...] = tuple(LabelRow.model_fields)
+"""labels.csv columns, in order (TECHNICAL_PLAN §4.5)."""
+
+
+def append_label(path: str | Path, row: LabelRow) -> None:
+    """Append one validated row to labels.csv under an exclusive file lock.
+
+    Append-only (TECHNICAL_PLAN §6): earlier rows are never rewritten; a correction is a new row
+    and the later one wins (``latest_normal_labels``). The header is written once, by whichever
+    writer finds the file empty while holding the lock. A file whose header isn't
+    ``LABEL_FIELDS`` is refused untouched. ``fcntl.flock`` works on Linux and macOS.
+    """
+    import fcntl
+    import os
+
+    row = LabelRow.model_validate(row.model_dump())
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+", newline="") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.seek(0, os.SEEK_END)
+            empty = f.tell() == 0
+            if not empty:
+                f.seek(0)
+                header = f.readline().rstrip("\r\n")
+                if header != ",".join(LABEL_FIELDS):
+                    raise ValueError(
+                        f"{path}: header {header!r} != {','.join(LABEL_FIELDS)!r}; not appending"
+                    )
+                f.seek(0, os.SEEK_END)  # back to the end before switching from reading to writing
+            w = csv.DictWriter(f, fieldnames=list(LABEL_FIELDS))
+            if empty:
+                w.writeheader()
+            w.writerow(row.model_dump(mode="json"))
+            f.flush()
+            os.fsync(f.fileno())
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)

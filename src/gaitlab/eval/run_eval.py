@@ -7,8 +7,10 @@
 normal-mode label per window), and writes through ``report.results.write_result``:
 
 - ``grader/ladder.json`` (G1): exact, within-1 and QWK with session-bootstrap CIs per model, in
-  ladder order, plus ``best`` (highest QWK point). An optional ``<model>.meta.json`` next to the
-  predictions (e.g. the chosen LightGBM grid point) is copied in as ``selection``.
+  ladder order, plus ``best`` (highest QWK point). Each model also gets ``confusion``: 5x5
+  counts, rows = true grade 1..5, columns = predicted (``viz.plots.confusion_chart``). An
+  optional ``<model>.meta.json`` next to the predictions (e.g. the chosen LightGBM grid point)
+  is copied in as ``selection``.
 - ``grader/tags.json`` (G3): macro-F1 and per-tag F1 per model.
 - ``grader/calibration.json`` (G5): ECE, Brier and the reliability table for models that output
   probabilities (``p1..p5`` filled); the rest are listed under ``no_probabilities``.
@@ -70,6 +72,10 @@ def grade_metrics(
         "qwk": m.cluster_bootstrap_ci(
             lambda i: m.quadratic_weighted_kappa(yt[i], yp[i]), groups, n_boot, seed=seed
         ),
+        "confusion": {
+            "grades": [int(g) for g in m.GRADES],
+            "counts": m.confusion_counts(yt, yp).tolist(),  # rows: true, columns: predicted
+        },
     }
     if probs is not None:
         out["ece"] = m.ece(probs, yt)

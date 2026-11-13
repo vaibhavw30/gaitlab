@@ -24,11 +24,14 @@ Every number a reader sees comes from here, through `report/results.py`. If it i
 
 ## 2. Grader ladder
 
-Same split and same windows for every model: rules, logistic regression, LightGBM, Gemma 3 1B zero-shot, Gemma 3 1B + LoRA, Gemma 3 270M + LoRA. The ladder chart shows QWK with 95% CI per model and a dashed line at the intra-rater QWK.
+Same split and same windows for every model: rules, logistic regression, LightGBM, Gemma 3 1B zero-shot, Gemma 3 1B + LoRA, Gemma 3 270M + LoRA. The ladder chart shows QWK with 95% CI per model and a dashed line at the intra-rater QWK. Per model, `ladder.json` also holds the 5×5 grade confusion counts (rows: my grade, columns: predicted), drawn by `viz.plots.confusion_chart`; `viz.plots.reliability_chart` draws the G5 bins (accuracy vs mean confidence, windows per bin).
 
 ## 3. Protocol details
 
 - **Bootstrap:** 2,000 resamples. Resample **sessions** (cluster bootstrap), then the windows within them; percentile CIs. Seed fixed in config.
+- **V5 directions:** per session with both clips, median of the condition's window medians (`<feature>_med`) minus the natural clip's; the point estimate is the mean over sessions, and the CI resamples sessions. Reported: sign, size, CI, `sign_ok` (point has the expected sign) and `ci_on_expected_side`. No threshold on size.
+- **V6 stability:** ICC(2,1) per feature. Targets are (session, condition) cells; repeats are each cell's first `k` windows in time order, `k` = the smallest window count among cells with at least 2. ICC also depends on how much the cells differ from each other, so a feature that conditions don't change can score low while being steady.
+- **V7 backend agreement:** near-side strides of the two backends matched one-to-one within (session, clip, side) by nearest IC, accepted closer than half a stride; Bland–Altman (bias, 95% limits) per feature on the matched pairs. Unmatched strides are counted. The per-stride pairs live in `data/` (too large to commit); the result stores their sha256.
 - **QWK:** `sklearn.metrics.cohen_kappa_score(weights="quadratic")` with labels fixed to [1..5]; tested against a hand-computed example.
 - **ECE:** confidence = max P(grade), 10 equal-width bins, weighted by bin count.
 - **Within-1:** |pred − label| ≤ 1.

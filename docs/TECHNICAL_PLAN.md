@@ -85,6 +85,11 @@ All schemas also live as dataclasses or pydantic models in `types.py` and `data/
 - Halpe-26 (RTMPose body7) → canonical: heel = 24/25, toe = big toe 20/21.
 - COCO-17 sources (e.g. Guo et al. YOLOv8 CSVs) have no heel or toe. Load them with heel and toe = NaN; foot-dependent features become NaN, which is tested.
 
+**Backends** (`pose/base.py` `get_backend`; both behind `PoseBackend.run(frames, fps, size)`):
+- `mediapipe`: Tasks API `PoseLandmarker`, VIDEO mode, one pose, `pose.mediapipe_model` (heavy). Timestamps are integer ms from PTS, bumped to stay strictly increasing; `KeypointSeq.t` keeps the true PTS. `vis` = landmark visibility.
+- `rtmpose`: rtmlib `BodyWithFeet` model zoo, i.e. a YOLOX person detector plus an RTMPose **Halpe-26** model; `pose.rtmpose_mode` picks `performance` | `balanced` | `lightweight`. Models are downloaded by rtmlib's `download_checkpoint` into `models/rtmlib/` (inside the repo, git-ignored), not `~/.cache`. Detector and pose model are called separately: rtmlib's pose model falls back to the whole image when it gets no boxes, so a frame where the detector finds nobody is NaN with vis 0, not a full-frame skeleton. Several people → the one with the highest mean keypoint score. Frames go in as BGR. `vis` = SimCC score clipped to [0, 1]; raw p05/p50/p95 in `meta["score_quantiles"]` for tuning `clean.visibility_min` per backend. onnxruntime runs on `cuda` when its CUDA provider exists, else `cpu`. A model without 26 keypoints is refused.
+- Both: no detection → NaN xy, vis 0; frame size must match the clip; meta records the library version and model file hashes.
+
 ### 4.2 `KeypointSeq` (`data/interim/<session>/<clip>.<backend>.npz`)
 
 | key | shape | dtype | meaning |
@@ -95,7 +100,7 @@ All schemas also live as dataclasses or pydantic models in `types.py` and `data/
 | `fps` | () | float64 | nominal fps |
 | `size` | (2,) | int32 | (width, height) |
 | `backend` | () | str | `mediapipe` / `rtmpose` / `mocap_proj` / `synthetic` |
-| `meta` | () | str (JSON) | backend version, model file hash |
+| `meta` | () | str (JSON) | backend version, model file hash; from `extract` also `session_id`, `clip_id`, `video`, `video_sha256`, `vfr`, `codec` |
 
 Downstream code converts to **y-up** once via `gait.geometry.to_y_up()`.
 
@@ -177,10 +182,11 @@ Tag vocabulary (v1), defined in `configs/features.yaml` with each tag's feature,
 
 ## 6. Labeling (`label/app.py`)
 
-Gradio app. Left: the window's clip segment with the skeleton overlay (pre-rendered by `viz.overlay`). Right: feature medians and IQRs, a 1–5 radio, tag checkboxes, a cue textbox, Save / Skip.
-- **Normal mode** shows windows not yet labeled, ordered by session then time.
-- **Blind re-grade mode** samples `n` (default 40) labeled windows at random (seeded) and hides previous labels and features. Rows are written with `mode=blind_regrade`.
-- Append-only CSV writes with a file lock; never rewrite earlier rows.
+Gradio app, served on 127.0.0.1 only. Left: the window's clip segment `[t_start, t_end]` with the skeleton overlay (`viz.overlay.render_overlay(t_range=…)`; events and angles come from the whole clip), on the source video when it's found (`sessions.csv` path, else `raw/<session>/<clip>.mp4`), else on a plain canvas. Clips are rendered on first view into `<root>/labels/overlays/` and reused. Right: feature medians and IQRs, a 1–5 radio, tag checkboxes (`features.yaml` vocabulary), a cue textbox, Back / Skip / Save. Keys 1–5 set the grade and Enter saves (not while typing in a text box). Logic lives in `label/queue.py` (pure); the writer is `data.sessions.append_label`.
+- **Normal mode** shows windows without a normal-mode label, ordered by session, then clip (windows-table order), then `t_start`.
+- **Blind re-grade mode** (`--blind N`, default 40 in EVALUATION G2) draws `N` normal-labeled windows with `--seed` (from the sorted ids, so the draw depends only on which windows are labeled) and skips those already re-graded, so a restart resumes the same sample. It hides previous labels, the feature table, the window id (a clip id names the condition) and the overlay's angle/cadence text. Rows are written with `mode=blind_regrade`.
+- Each Save validates the row (`LabelRow`: grade 1–5, tags from the vocabulary in vocabulary order, cue collapsed to one line, rater, UTC `labeled_at`) and appends it under an exclusive `fcntl.flock`; the header is written once; a file with a different header is refused. Earlier rows are never rewritten: a correction is a new row and the later one wins (`latest_normal_labels`).
+- Synthetic windows can only be labeled with `--synthetic`, into `data/synthetic/labels/hand_labels.csv` (never synth's rule-label `labels.csv`); real and synthetic windows are never mixed (CLAUDE.md rule 3).
 
 ## 7. Models
 
@@ -253,17 +259,18 @@ Metric definitions, splits and protocol live in [EVALUATION.md](EVALUATION.md). 
 
 | Command | Does |
 |---|---|
-| `extract --backend {mediapipe,rtmpose} --session S` | video → KeypointSeq npz |
-| `process --session S [--sessions CSV]` | clean → events → strides.parquet → windows.parquet for every clip of S. Reads `<CSV dir>/interim/S/<clip>.<backend>.npz`, writes `<CSV dir>/processed/S/` |
+| `extract --session S [--sessions CSV] [--backend {mediapipe,rtmpose}] [--clip C] [--allow-low-fps] [--overwrite]` | video → KeypointSeq npz for every clip of S (standing clips too), written to `<CSV dir>/interim/S/<clip>.<backend>.npz` where `process` reads it. Backend defaults to `pose.backend`. Every clip is probed and fps-checked (`capture.min_fps`) before any model runs; rows that already point at an `.npz` are refused (use `process`); existing npz are skipped unless `--overwrite` |
+| `process --session S [--sessions CSV]` | clean → events → strides.parquet → windows.parquet for every clip of S. Reads `<CSV dir>/interim/S/<clip>.<backend>.npz`, writes `<CSV dir>/processed/S/` (no backend in the path: processing a second backend overwrites the first; `validate own` doesn't need processed files) |
 | `process --clip NPZ` | the same for one KeypointSeq with no sessions row: session = the npz's folder name, clip = file name up to the first dot, condition inferred from the clip id. Writes `<clip>.strides.parquet` and `<clip>.windows.parquet` to `data/processed/<session>/` (`data/synthetic/processed/<session>/` for synthetic keypoints) unless `--out` |
 | `overlay --clip NPZ [--video MP4] [--gif]` | skeleton + IC/TO markers + near-side knee and shin angles, on the video or on a plain canvas of `KeypointSeq.size`. Default output `<npz stem>.overlay.{mp4,gif}` |
-| `label [--blind N]` | launch labeling app |
+| `label [--blind N] [--seed S] [--rater R] [--synthetic] [--root DIR] [--backend B] [--port P] [--no-browser]` | labeling app (§6) on `<root>/processed/*/windows.parquet` → `<root>/labels/labels.csv` (`--synthetic`: `data/synthetic/labels/hand_labels.csv`) |
 | `baselines [--synthetic]` | fit and predict rules / LR / LightGBM. `--synthetic`: on `data/synthetic`, predictions to `data/synthetic/predictions/` |
 | `build-sft [--synthetic]` | labels + windows → SFT JSONL (session split). `--synthetic`: `data/synthetic/sft/*.jsonl` |
 | `train --model {1b,270m} [--sft-dir DIR] [--allow-synthetic] [--max-steps N] [--device D]` | LoRA fine-tune → `runs/<run_id>/` |
 | `predict --model {1b,270m} [--synthetic] [--adapter RUN \| --zero-shot] [--consistency-runs R]` | logit grade + greedy tags + cue for the test windows (newest run of `--model` by default) → `predictions/<model>.csv`, `.meta.json`, `.consistency.json`. `--synthetic` only until real labels exist |
 | `eval [--synthetic]` | all metrics → results/grader (`--synthetic`: results/synthetic/grader, never reported); `verifier` and `consistency` when an LLM's predictions are present |
-| `validate {biocv,mocap}` | event and feature validation → results/validation |
+| `validate own [--sessions CSV] [--backend B] [--other B2] [--session S]… [--synthetic]` | V5 directions, V6 stability ICC and, with `--other`, V7 backend agreement (`eval.own_validation`, EVALUATION §3) → results/validation. Recomputes strides and windows from `<CSV dir>/interim/<session>/<clip>.<backend>.npz` with the `process` code (`data.analysis`), so the backend is known; V7's matched stride pairs go to `<CSV dir>/processed/backend_pairs.<B>-<B2>.parquet` (sha256 in the result) |
+| `validate {biocv,mocap}` | event and feature validation on public data → results/validation |
 | `bench --trt [--synthetic] [--model {1b,270m}] [--adapter RUN \| --zero-shot]` | B2 TensorRT vs eager grade scoring pass on CUDA → `results/bench/trt.json` (`--synthetic`: synthetic SFT prompts and run → `results/synthetic/bench/`). Plain `bench` (B1 latency pipeline) is not written yet |
 | `report` | regenerate the README results table |
 | `synth --n-sessions K [--write-keypoints]` | synthetic sessions + rule labels for dry runs (`synthetic=True`). `--write-keypoints` also saves each clip as `data/synthetic/interim/<session>/<clip>.synthetic.npz` plus `data/synthetic/sessions.csv` (§4.6 schema + `synthetic` column) |

@@ -20,6 +20,21 @@ def within_one(y_true: Sequence[int], y_pred: Sequence[int]) -> float:
     return float(np.mean(np.abs(yt - yp) <= 1))
 
 
+def confusion_counts(y_true: Sequence[int], y_pred: Sequence[int]) -> np.ndarray:
+    """(5, 5) int counts: row = true grade 1..5, column = predicted grade 1..5.
+
+    Every grade gets a row and a column, also when no window has it.
+    """
+    yt, yp = np.asarray(y_true, dtype=int), np.asarray(y_pred, dtype=int)
+    if yt.shape != yp.shape:
+        raise ValueError(f"y_true and y_pred differ in length ({yt.size} vs {yp.size})")
+    if yt.size and not (np.isin(yt, GRADES).all() and np.isin(yp, GRADES).all()):
+        raise ValueError("grades must be integers in 1..5")
+    counts = np.zeros((len(GRADES), len(GRADES)), dtype=np.int64)
+    np.add.at(counts, (yt - 1, yp - 1), 1)
+    return counts
+
+
 def quadratic_weighted_kappa(
     y_true: Sequence[int], y_pred: Sequence[int], labels: Sequence[int] = tuple(GRADES)
 ) -> float:

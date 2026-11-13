@@ -10,6 +10,7 @@ data/
 ├── raw/<session_id>/<clip_id>.mp4
 ├── interim/<session_id>/<clip_id>.<backend>.npz     # KeypointSeq
 ├── processed/<session_id>/{strides,windows}.parquet
+├── processed/backend_pairs.<a>-<b>.parquet   # V7 matched strides (gaitlab validate own --other)
 ├── labels/labels.csv            # append-only
 ├── sft/{train,dev,test}.jsonl
 ├── splits.json                  # session_id → train|dev|test (frozen once written)

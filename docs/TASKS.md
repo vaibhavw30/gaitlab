@@ -33,10 +33,10 @@ Goal: the whole pipeline runs on other people's running and on synthetic data, s
 - [~] **Results provenance + README table + claim check** — `report/results.py`, `report/readme_table.py`, `scripts/check_readme_numbers.py`. Tests: `test_results.py`
 - [~] **Prompt, SFT builder, verifier, rules, splits** — `llm/prompt.py`, `llm/sft_data.py`, `llm/verifier.py`, `models/rules.py`, `data/splits.py`. Tests: `test_prompt.py`, `test_verifier.py`, `test_splits.py`
 - [x] **Video decode** — `io/video.py` (PyAV, PTS timestamps, fps check, rotation, VFR flag; ADR-0010). Test: `test_video.py` with tiny generated clips (PyAV encodes them in-test)
-- [ ] **MediaPipe backend** — `pose/mediapipe_backend.py` (Tasks API `PoseLandmarker`, VIDEO running mode, heavy model). Smoke test on own clip `data/raw/SMOKE/natural.mp4` (`@pytest.mark.data`)
-- [ ] **RTMPose backend** — `pose/rtmpose_backend.py` via rtmlib `Body` (Halpe-26 / body7 model). Same smoke test
+- [~] **MediaPipe backend** — `pose/mediapipe_backend.py` (Tasks API `PoseLandmarker`, VIDEO running mode, heavy model). Unit tests with a fake detector pass (`test_mediapipe_backend.py`); `gaitlab extract` runs the real heavy model end to end on a generated clip. Left: smoke test on own clip `data/raw/SMOKE/natural.mp4` (`@pytest.mark.data`, user records it)
+- [~] **RTMPose backend** — `pose/rtmpose_backend.py` via rtmlib (`BodyWithFeet` zoo: YOLOX + RTMPose Halpe-26; models in `models/rtmlib/`). Unit tests with a fake estimator pass (`test_rtmpose_backend.py`); the real detector + pose model load and run on CPU (no-person path, 26 keypoints). Left: the same smoke test on own clip
 - [x] **Overlay** — `viz/overlay.py`: skeleton, contact markers, knee/shin angle text → mp4 and GIF; video background optional (plain canvas from `KeypointSeq.size`). Tests: `test_overlay.py` (ADR-0011)
-- [ ] **CLI wiring** — `extract`, `process`, `overlay`, `synth` in `cli.py`. Done: `synth --write-keypoints`, `process --session/--clip`, `overlay --clip [--video] [--gif]` (`test_cli.py`, ADR-0011). Left: `extract`
+- [x] **CLI wiring** — `extract`, `process`, `overlay`, `synth` in `cli.py`. `synth --write-keypoints`, `process --session/--clip`, `overlay --clip [--video] [--gif]` (`test_cli.py`, ADR-0011); `extract --session` (`test_cli_extract.py`)
 - [x] **Synthetic dry run** — `gaitlab synth --n-sessions 6` → strides, windows, rule labels (`synthetic=True`) → `baselines --synthetic` → `build-sft --synthetic` → `eval --synthetic` writes to `results/synthetic/grader/` (`test_cli.py`, ADR-0012)
 - [ ] **Mocap projection** — `data/mocap.py` for Fukuchi 2017 (smallest; CC-BY) then Running Injury Clinic. → `results/validation/mocap_features.json` (V3)
 - [ ] **BioCV loader + event validation** — `data/biocv.py`; `gaitlab validate biocv` → `results/validation/biocv_events.json` (V1), `biocv_angles.json` (V2). **Confirm the license with the user first.**
@@ -55,10 +55,10 @@ Goal: the whole pipeline runs on other people's running and on synthetic data, s
 ## M2 — Features and labels
 
 - [ ] Remaining sessions recorded (6–8 total) (user task)
-- [ ] Direction checks → `results/validation/directions.json` (V5); stability ICC → `stability.json` (V6)
-- [ ] Backend agreement → `results/validation/backend_agreement.json` (V7)
+- [~] Direction checks → `results/validation/directions.json` (V5); stability ICC → `stability.json` (V6). Code: `gaitlab validate own` (`eval/own_validation.py`, `test_own_validation.py`, synthetic run finds every expected direction). Left: run on own sessions
+- [~] Backend agreement → `results/validation/backend_agreement.json` (V7). Code: `validate own --other rtmpose`, chart `viz.plots.bland_altman_chart` (`test_plots.py`). Left: run on own sessions with both backends extracted
 - [ ] **Calibrate `configs/features.yaml` thresholds** from natural-condition windows + Running Injury Clinic percentiles → ADR-0009
-- [ ] Labeling app `label/app.py` (normal + blind modes; append-only CSV with lock)
+- [x] Labeling app `label/app.py` (normal + blind modes; append-only CSV with lock); logic in `label/queue.py`, writer `data.sessions.append_label` (`test_label.py`, window overlays `test_overlay.py`)
 - [ ] Label ~200 windows (user task); freeze `data/splits.json`
 - [~] Baselines `models/baselines.py` (LR, LightGBM, LOSO CV). Tested on synthetic (`test_baselines.py`); `gaitlab baselines` without `--synthetic` waits for real labels and `data/splits.json`
 
@@ -70,7 +70,7 @@ Goal: the whole pipeline runs on other people's running and on synthetic data, s
 - [ ] Zero-shot 1B predictions
 - [ ] Blind re-grade of 40 windows (user task) → `results/grader/intra_rater.json` (G2)
 - [ ] `eval/run_eval.py` → G1, G3–G6 result files. Done: G1 `ladder`, G3 `tags`, G4 `verifier`, G5 `calibration`, G6 `consistency` (`test_run_eval.py`; synthetic dry run with `gaitlab predict`). Left: real-data result files (need M2 labels and a GPU-trained adapter)
-- [ ] `viz/plots.py`: ladder chart, knee-angle-by-condition, confusion matrix, reliability diagram. Done: ladder, knee-by-condition (`test_plots.py`). Left: confusion, reliability
+- [x] `viz/plots.py`: ladder chart, knee-angle-by-condition, confusion matrix (counts per model in `ladder.json`), reliability diagram (from `calibration.json`); synthetic or dirty-tree results never plot under `docs/` (`test_plots.py`)
 
 ## M4 — Speed and polish
 

@@ -87,6 +87,11 @@ def test_run_writes_synthetic_ladder_tags_and_calibration(inputs):
         assert ladder["models"][m]["n_sessions"] == 2
     assert ladder["models"]["lgbm"]["selection"] == {"params": {"num_leaves": 7}}
     assert ladder["best"]["model"] == "rules"  # rules copy the labels here
+    conf = ladder["models"]["rules"]["confusion"]
+    assert conf["grades"] == [1, 2, 3, 4, 5]
+    counts = np.array(conf["counts"])  # rows: my grade, columns: predicted
+    assert counts.sum() == n_test and np.trace(counts) == n_test  # rules copy the labels
+    assert np.array(ladder["models"]["logreg"]["confusion"]["counts"]).sum() == n_test
     assert isinstance(ladder["best"]["qwk"], float)
     tags = json.loads(out["tags"].read_text())["metrics"]
     assert set(tags["models"]) == {"rules", "logreg", "lgbm"}
